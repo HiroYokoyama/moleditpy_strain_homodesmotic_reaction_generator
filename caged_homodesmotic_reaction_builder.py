@@ -192,6 +192,26 @@ ENVIRONMENTS: tuple[EnvironmentRule, ...] = (
         "CC(C)(C)OC(C)(C)C",
         "Ether oxygen bonded to two quaternary carbons.",
     ),
+    
+    # Carbonyls
+    EnvironmentRule("Primary-Carbonyl", "[CX4H3]-[CX3](=[OX1])", "CC(=O)C", "Carbonyl carbon bonded to primary carbons."),
+    EnvironmentRule("Secondary-Carbonyl", "[CX4H2]-[CX3](=[OX1])", "CCC(=O)C", "Carbonyl carbon bonded to a secondary carbon."),
+    EnvironmentRule("Tertiary-Carbonyl", "[CX4H1]-[CX3](=[OX1])", "CC(C)C(=O)C", "Carbonyl carbon bonded to a tertiary carbon."),
+    EnvironmentRule("Quaternary-Carbonyl", "[CX4H0]-[CX3](=[OX1])", "CC(C)(C)C(=O)C", "Carbonyl carbon bonded to a quaternary carbon."),
+    
+    # Amines
+    EnvironmentRule("Primary-Primary-Amine", "[CX4H3]-[NX3H2]", "CN", "Primary amine bonded to primary carbon."),
+    EnvironmentRule("Secondary-Primary-Amine", "[CX4H2]-[NX3H2]", "CCN", "Primary amine bonded to secondary carbon."),
+    EnvironmentRule("Tertiary-Primary-Amine", "[CX4H1]-[NX3H2]", "CC(C)N", "Primary amine bonded to tertiary carbon."),
+    EnvironmentRule("Quaternary-Primary-Amine", "[CX4H0]-[NX3H2]", "CC(C)(C)N", "Primary amine bonded to quaternary carbon."),
+    EnvironmentRule("Primary-Secondary-Amine", "[CX4H3]-[NX3H1]", "CNC", "Secondary amine bonded to primary carbon."),
+    EnvironmentRule("Secondary-Secondary-Amine", "[CX4H2]-[NX3H1]", "CCNC", "Secondary amine bonded to secondary carbon."),
+    EnvironmentRule("Tertiary-Secondary-Amine", "[CX4H1]-[NX3H1]", "CC(C)NC", "Secondary amine bonded to tertiary carbon."),
+    EnvironmentRule("Quaternary-Secondary-Amine", "[CX4H0]-[NX3H1]", "CC(C)(C)NC", "Secondary amine bonded to quaternary carbon."),
+    EnvironmentRule("Primary-Tertiary-Amine", "[CX4H3]-[NX3H0]", "CN(C)C", "Tertiary amine bonded to primary carbon."),
+    EnvironmentRule("Secondary-Tertiary-Amine", "[CX4H2]-[NX3H0]", "CCN(C)C", "Tertiary amine bonded to secondary carbon."),
+    EnvironmentRule("Tertiary-Tertiary-Amine", "[CX4H1]-[NX3H0]", "CC(C)N(C)C", "Tertiary amine bonded to tertiary carbon."),
+    EnvironmentRule("Quaternary-Tertiary-Amine", "[CX4H0]-[NX3H0]", "CC(C)(C)N(C)C", "Tertiary amine bonded to quaternary carbon."),
 )
 
 
@@ -200,6 +220,8 @@ BALANCE_SPECIES: tuple[BalanceSpecies, ...] = (
     BalanceSpecies("ethane", "CC", "Two-carbon saturated hydrocarbon balance species."),
     BalanceSpecies("propane", "CCC", "Three-carbon saturated hydrocarbon balance species."),
     BalanceSpecies("butane", "CCCC", "Four-carbon saturated hydrocarbon balance species."),
+    BalanceSpecies("Pentane", "CCCCC", "Five-carbon saturated hydrocarbon"),
+    BalanceSpecies("Hexane", "CCCCCC", "Six-carbon saturated hydrocarbon"),
     BalanceSpecies("Dimethyl ether", "COC", "Simplest ether"),
     BalanceSpecies("Ethyl methyl ether", "CCOC", "Asymmetric aliphatic ether"),
     BalanceSpecies("Diethyl ether", "CCOCC", "Common symmetric ether"),
@@ -207,6 +229,13 @@ BALANCE_SPECIES: tuple[BalanceSpecies, ...] = (
     BalanceSpecies("Neopentane", "CC(C)(C)C", "Highly branched alkane"),
     BalanceSpecies("Isopropyl methyl ether", "COC(C)C", "Branched ether"),
     BalanceSpecies("tert-Butyl methyl ether", "COC(C)(C)C", "Highly branched ether"),
+    BalanceSpecies("Formaldehyde", "C=O", "Simplest carbonyl"),
+    BalanceSpecies("Acetaldehyde", "CC=O", "Simplest aldehyde"),
+    BalanceSpecies("Acetone", "CC(=O)C", "Simplest ketone"),
+    BalanceSpecies("Ammonia", "N", "Simplest amine"),
+    BalanceSpecies("Methylamine", "CN", "Primary amine"),
+    BalanceSpecies("Dimethylamine", "CNC", "Secondary amine"),
+    BalanceSpecies("Trimethylamine", "CN(C)C", "Tertiary amine"),
 )
 
 
@@ -274,25 +303,33 @@ def count_groups(mol: Any) -> Counter[str]:
         if atomic_num == 1:
             continue
         if atomic_num == 8:
-            counts["O(C)(C)"] += 1
+            if atom.GetDegree() == 1:
+                counts["=O"] += 1
+            else:
+                counts["O(C)(C)"] += 1
+        elif atomic_num == 7:
+            h_count = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 1)
+            counts[f"N(H{h_count})"] += 1
         elif atomic_num == 6:
             h_count = 0
             o_count = 0
-            for n in atom.GetNeighbors():
-                if n.GetAtomicNum() == 1:
+            n_count = 0
+            carbonyl_o = 0
+            for bond in atom.GetBonds():
+                neighbor = bond.GetOtherAtom(atom)
+                if neighbor.GetAtomicNum() == 1:
                     h_count += 1
-                elif n.GetAtomicNum() == 8:
-                    o_count += 1
-            if h_count == 4:
-                counts["CH4"] += 1
-            elif h_count == 3:
-                counts["CH3(O)" if o_count else "CH3(C)"] += 1
-            elif h_count == 2:
-                counts["CH2(C)(O)" if o_count else "CH2(C)(C)"] += 1
-            elif h_count == 1:
-                counts["CH(C)(C)(O)" if o_count else "CH(C)(C)(C)"] += 1
-            elif h_count == 0:
-                counts["C(C)(C)(C)(O)" if o_count else "C(C)(C)(C)(C)"] += 1
+                elif neighbor.GetAtomicNum() == 8:
+                    if bond.GetBondType() == Chem.BondType.DOUBLE:
+                        carbonyl_o += 1
+                    else:
+                        o_count += 1
+                elif neighbor.GetAtomicNum() == 7:
+                    n_count += 1
+            if carbonyl_o:
+                counts[f"C(=O)(H{h_count})(O{o_count})(N{n_count})"] += 1
+            else:
+                counts[f"C(H{h_count})(O{o_count})(N{n_count})"] += 1
     return counts
 
 
