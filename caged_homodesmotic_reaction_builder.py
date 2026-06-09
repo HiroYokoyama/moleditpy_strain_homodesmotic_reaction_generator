@@ -864,8 +864,8 @@ def build_equation_html(
         '<hr style="border:0; border-top:1px solid #3c4043;">'
         f'<p style="font-size:14px;">{" + ".join(lhs_parts)} '
         f'<span style="color:#e8eaed;">-&gt;</span> {" + ".join(rhs_parts)}</p>'
-        '<p style="color:#9aa0a6;">Blue = original target, green = detected reference, '
-        'yellow/purple = automatically added balance species, red = unresolved.</p>'
+        '<p style="color:#9aa0a6;">Blue = original target and reference cores, '
+        'yellow = automatically added balance species and caps, red = unresolved.</p>'
         '</div>'
     )
 
@@ -995,8 +995,8 @@ if QDialog is not None:
             
             self.table.setRowCount(len(matches) + len(left) + len(right))
             
-            ref_brush = QBrush(QColor("#8ab4f8"))
-            balance_brush = QBrush(QColor("#fdd663"))
+            ref_brush = QBrush(QColor("#1967d2"))
+            balance_brush = QBrush(QColor("#b06000"))
             
             row = 0
             for match in matches:
