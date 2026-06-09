@@ -345,7 +345,63 @@ def test_reaction_type_classification():
     result_hmta = analyze_molecule(Chem.MolFromSmiles("C1N2CN3CN1CN(C2)C3"))
     assert result_hmta.reaction_type == "Elemental Balance"
 
+def test_reaction_type_classification_levels():
+    from strain_homodesmotic_reaction_generator.core import (
+        classify_reaction_type,
+        BalanceTerm,
+        ReferenceTerm
+    )
 
+    # 1. Unbalanced: mismatched atoms or unresolved atoms
+    assert classify_reaction_type(
+        "CC",
+        (),
+        (),
+        (),
+        Counter({"C": 1}),
+        Counter()
+    ) == "Unbalanced"
 
+    # 2. Hyperhomodesmotic (balanced environment groups and hybridized bonds)
+    assert classify_reaction_type(
+        "CC",
+        (),
+        (ReferenceTerm(1, "CC", (0, 1)),),
+        (),
+        Counter(),
+        Counter()
+    ) == "Hyperhomodesmotic"
+
+    # 3. Homodesmotic (balanced atoms and groups, but mismatched hybridized bonds)
+    # e.g., 2 Propane -> Ethane + Butane
+    assert classify_reaction_type(
+        "CCC",
+        (BalanceTerm("propane", "CCC", 1),),
+        (),
+        (BalanceTerm("ethane", "CC", 1), BalanceTerm("butane", "CCCC", 1)),
+        Counter(),
+        Counter()
+    ) == "Homodesmotic"
+
+    # 4. Isodesmic (balanced simple bonds, but mismatched hybridized bonds and groups)
+    # e.g., Propene + Ethane -> Propane + Ethene
+    assert classify_reaction_type(
+        "CC=C",
+        (BalanceTerm("ethane", "CC", 1),),
+        (),
+        (BalanceTerm("propane", "CCC", 1), BalanceTerm("Ethene", "C=C", 1)),
+        Counter(),
+        Counter()
+    ) == "Isodesmic"
+
+    # 5. Elemental Balance (only atoms match, not bonds)
+    assert classify_reaction_type(
+        "C=C",
+        (BalanceTerm("methane", "C", 2),),
+        (),
+        (BalanceTerm("propane", "CCC", 1), BalanceTerm("methane", "C", 1)),
+        Counter(),
+        Counter()
+    ) == "Elemental Balance"
 
 

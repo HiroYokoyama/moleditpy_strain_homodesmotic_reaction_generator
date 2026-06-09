@@ -160,7 +160,7 @@ def get_atom_state(atom: Any) -> str:
     if symbol == "H":
         return "H"
     hyb = str(atom.GetHybridization()).lower()
-    h_count = atom.GetTotalNumHs()
+    h_count = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 1)
     return f"{symbol}({hyb},H{h_count})"
 
 
@@ -253,21 +253,7 @@ def classify_reaction_type(
     if lhs_atoms != rhs_atoms:
         return "Unbalanced"
 
-    # 2. Hyperhomodesmotic check (LHS groups == RHS groups)
-    lhs_groups: Counter[str] = Counter()
-    for mol, count in lhs_mols:
-        for group, grp_count in count_groups(Chem.RemoveHs(mol)).items():
-            lhs_groups[group] += grp_count * count
-
-    rhs_groups: Counter[str] = Counter()
-    for mol, count in rhs_mols:
-        for group, grp_count in count_groups(Chem.RemoveHs(mol)).items():
-            rhs_groups[group] += grp_count * count
-
-    if lhs_groups == rhs_groups:
-        return "Hyperhomodesmotic"
-
-    # 3. Homodesmotic check (LHS hybridized bonds == RHS hybridized bonds)
+    # 2. Hyperhomodesmotic check (LHS hybridized bonds == RHS hybridized bonds)
     def get_hybridized_bonds(m: Any) -> Counter[str]:
         bonds: Counter[str] = Counter()
         if m is None:
@@ -291,6 +277,20 @@ def classify_reaction_type(
             rhs_hyb_bonds[btype] += b_count * count
 
     if lhs_hyb_bonds == rhs_hyb_bonds:
+        return "Hyperhomodesmotic"
+
+    # 3. Homodesmotic check (LHS groups == RHS groups)
+    lhs_groups: Counter[str] = Counter()
+    for mol, count in lhs_mols:
+        for group, grp_count in count_groups(Chem.RemoveHs(mol)).items():
+            lhs_groups[group] += grp_count * count
+
+    rhs_groups: Counter[str] = Counter()
+    for mol, count in rhs_mols:
+        for group, grp_count in count_groups(Chem.RemoveHs(mol)).items():
+            rhs_groups[group] += grp_count * count
+
+    if lhs_groups == rhs_groups:
         return "Homodesmotic"
 
     # 4. Isodesmic check (LHS simple bonds == RHS simple bonds)
