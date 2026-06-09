@@ -975,7 +975,7 @@ if QDialog is not None:
 
             mol = _current_molecule(self.context)
             self.last_result = analyze_molecule(mol)
-            self._populate_table(self.last_result.matches)
+            self._populate_table(self.last_result)
             self.equation_box.setHtml(self.last_result.equation_html)
 
             if mol is None or mol.GetNumAtoms() == 0:
@@ -987,19 +987,42 @@ if QDialog is not None:
                     3000,
                 )
 
-        def _populate_table(self, matches: tuple[EnvironmentMatch, ...]) -> None:
-            self.table.setRowCount(len(matches))
-            for row, match in enumerate(matches):
-                self.table.setItem(row, 0, QTableWidgetItem(match.name))
+        def _populate_table(self, result: AnalysisResult) -> None:
+            matches = result.matches
+            left = result.left_balance_terms
+            right = result.right_balance_terms
+            
+            self.table.setRowCount(len(matches) + len(left) + len(right))
+            
+            row = 0
+            for match in matches:
+                self.table.setItem(row, 0, QTableWidgetItem(f"Ref: {match.name}"))
                 self.table.setItem(row, 1, QTableWidgetItem(str(match.count)))
                 self.table.setItem(row, 2, QTableWidgetItem(match.reference_smiles))
+                self._add_load_button(row, match.reference_smiles, match.description)
+                row += 1
+                
+            for term in left:
+                self.table.setItem(row, 0, QTableWidgetItem(f"Left Balance: {term.name}"))
+                self.table.setItem(row, 1, QTableWidgetItem(str(term.count)))
+                self.table.setItem(row, 2, QTableWidgetItem(term.smiles))
+                self._add_load_button(row, term.smiles, "Added left-side balance species")
+                row += 1
+                
+            for term in right:
+                self.table.setItem(row, 0, QTableWidgetItem(f"Right Balance: {term.name}"))
+                self.table.setItem(row, 1, QTableWidgetItem(str(term.count)))
+                self.table.setItem(row, 2, QTableWidgetItem(term.smiles))
+                self._add_load_button(row, term.smiles, "Added right-side balance species")
+                row += 1
 
-                load_button = QPushButton("Load Reference")
-                load_button.setToolTip(match.description)
-                load_button.clicked.connect(
-                    lambda _checked=False, smiles=match.reference_smiles: self.load_reference(smiles)
-                )
-                self.table.setCellWidget(row, 3, load_button)
+        def _add_load_button(self, row: int, smiles: str, tooltip: str) -> None:
+            load_button = QPushButton("Load Species")
+            load_button.setToolTip(tooltip)
+            load_button.clicked.connect(
+                lambda _checked=False, s=smiles: self.load_reference(s)
+            )
+            self.table.setCellWidget(row, 3, load_button)
 
         def load_reference(self, smiles: str) -> None:
             if _load_smiles_with_host(self.context, smiles):
