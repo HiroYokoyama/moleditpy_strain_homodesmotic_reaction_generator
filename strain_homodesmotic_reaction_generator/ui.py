@@ -137,7 +137,7 @@ if QDialog is not None:
             self.equation_box = QTextEdit()
             self.equation_box.setReadOnly(True)
             self.equation_box.setStyleSheet(
-                "background-color: #202124; color: #e8eaed; font-family: Consolas, monospace;"
+                "background-color: #202124; color: #e8eaed; font-family: Consolas, monospace; font-size: 15px;"
             )
             self.equation_box.setMinimumHeight(190)
             layout.addWidget(self.equation_box)
@@ -182,30 +182,45 @@ if QDialog is not None:
             
             self.table.setRowCount(len(matches) + len(left) + len(right))
             
-            ref_brush = QBrush(QColor("#1a73e8"))
-            left_brush = QBrush(QColor("#1b7a2d"))
-            right_brush = QBrush(QColor("#a142f4"))
+            ref_color = QColor("#1a73e8")
+            ref_bg = QColor("#1a73e8")
+            ref_bg.setAlpha(30)
+            ref_brush = QBrush(ref_color)
+            ref_bg_brush = QBrush(ref_bg)
+            
+            left_color = QColor("#1b7a2d")
+            left_bg = QColor("#1b7a2d")
+            left_bg.setAlpha(30)
+            left_brush = QBrush(left_color)
+            left_bg_brush = QBrush(left_bg)
+            
+            right_color = QColor("#a142f4")
+            right_bg = QColor("#a142f4")
+            right_bg.setAlpha(30)
+            right_brush = QBrush(right_color)
+            right_bg_brush = QBrush(right_bg)
             
             row = 0
             for match in matches:
-                self._set_colored_row(row, f"Ref: {match.name}", str(match.count), match.reference_smiles, ref_brush)
+                self._set_colored_row(row, f"Ref: {match.name}", str(match.count), match.reference_smiles, ref_brush, ref_bg_brush)
                 self._add_load_button(row, match.reference_smiles, match.description)
                 row += 1
                 
             for term in left:
-                self._set_colored_row(row, f"Left Balance: {term.name}", str(term.count), term.smiles, left_brush)
+                self._set_colored_row(row, f"Left Balance: {term.name}", str(term.count), term.smiles, left_brush, left_bg_brush)
                 self._add_load_button(row, term.smiles, "Added left-side balance species")
                 row += 1
                 
             for term in right:
-                self._set_colored_row(row, f"Right Balance: {term.name}", str(term.count), term.smiles, right_brush)
+                self._set_colored_row(row, f"Right Balance: {term.name}", str(term.count), term.smiles, right_brush, right_bg_brush)
                 self._add_load_button(row, term.smiles, "Added right-side balance species")
                 row += 1
 
-        def _set_colored_row(self, row: int, col0: str, col1: str, col2: str, brush: QBrush) -> None:
+        def _set_colored_row(self, row: int, col0: str, col1: str, col2: str, fg_brush: QBrush, bg_brush: QBrush) -> None:
             for col, text in enumerate((col0, col1, col2)):
                 item = QTableWidgetItem(text)
-                item.setForeground(brush)
+                item.setForeground(fg_brush)
+                item.setBackground(bg_brush)
                 self.table.setItem(row, col, item)
 
         def _add_load_button(self, row: int, smiles: str, tooltip: str) -> None:
@@ -232,8 +247,8 @@ if QDialog is not None:
             path, _ = QFileDialog.getSaveFileName(
                 self,
                 "Export Homodesmotic Reaction Draft",
-                "strain_homodesmotic_reaction_draft.csv",
-                "CSV Files (*.csv);;HTML Files (*.html);;Text Files (*.txt)",
+                "strain_homodesmotic_reaction_draft.html",
+                "HTML Files (*.html);;CSV Files (*.csv);;Text Files (*.txt)",
             )
             if not path:
                 return
