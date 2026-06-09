@@ -9,7 +9,7 @@ from collections import Counter
 from typing import Any
 
 try:
-    from PyQt6.QtCore import Qt
+    from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
     from PyQt6.QtWidgets import (
         QDialog,
         QFileDialog,
@@ -26,6 +26,9 @@ try:
     from PyQt6.QtGui import QColor, QBrush
 except ImportError:  # pragma: no cover
     Qt = None  # type: ignore[assignment]
+    QThread = None  # type: ignore[assignment]
+    pyqtSignal = None  # type: ignore[assignment]
+    QObject = None  # type: ignore[assignment]
     QDialog = None  # type: ignore[assignment]
     QFileDialog = None  # type: ignore[assignment]
     QHeaderView = None  # type: ignore[assignment]
@@ -81,6 +84,37 @@ def _load_smiles_with_host(context: Any, smiles: str) -> bool:
 
 if QDialog is not None:
 
+    class AnalysisWorker(QObject):
+        """Worker to run molecule analysis in a background thread."""
+        finished = pyqtSignal(object)
+        error = pyqtSignal(str)
+
+        def __init__(self, mol: Any) -> None:
+            super().__init__()
+            self.mol = mol
+
+        def run(self) -> None:
+            try:
+                result = analyze_molecule(self.mol)
+                self.finished.emit(result)
+            except Exception as e:
+                self.error.emit(str(e))
+
+
+    class LoadingDialog(QDialog):
+        """Modal loading dialog shown during background analysis."""
+        def __init__(self, parent: Any) -> None:
+            super().__init__(parent)
+            self.setWindowTitle("Analyzing...")
+            self.setModal(True)
+            self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint)
+            layout = QVBoxLayout(self)
+            label = QLabel("Analyzing molecule & calculating homodesmotic balance...\nPlease wait.")
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(label)
+            self.resize(320, 100)
+
+
     class HomodesmoticAnalyzerDialog(QDialog):
         """Qt dialog for the analyzer."""
 
@@ -100,6 +134,9 @@ if QDialog is not None:
                 "",
                 "",
                 False,
+                Counter(),
+                Counter(),
+                "Unbalanced",
             )
 
             from . import PLUGIN_VERSION
@@ -162,19 +199,69 @@ if QDialog is not None:
                 return
 
             mol = _current_molecule(self.context)
-            self.last_result = analyze_molecule(mol)
+            if mol is None or mol.GetNumAtoms() == 0:
+                self.last_result = AnalysisResult(
+                    "",
+                    Counter(),
+                    Counter(),
+                    Counter(),
+                    (),
+                    (),
+                    Counter(),
+                    Counter(),
+                    (),
+                    "No molecule is loaded.",
+                    "<p>No molecule is loaded.</p>",
+                    False,
+                    Counter(),
+                    Counter(),
+                    "Unbalanced",
+                )
+                self._populate_table(self.last_result)
+                self.equation_box.setHtml(self.last_result.equation_html)
+                self.warning_label.setVisible(False)
+                _status(self.context, "No molecule is loaded.", 3000)
+                return
+
+            self.analyze_button.setEnabled(False)
+            self.loading_dialog = LoadingDialog(self)
+
+            self.analysis_thread = QThread()
+            self.worker = AnalysisWorker(mol)
+            self.worker.moveToThread(self.analysis_thread)
+
+            self.analysis_thread.started.connect(self.worker.run)
+            self.worker.finished.connect(self.on_analysis_success)
+            self.worker.error.connect(self.on_analysis_error)
+
+            self.worker.finished.connect(self.analysis_thread.quit)
+            self.worker.finished.connect(self.worker.deleteLater)
+            self.worker.error.connect(self.analysis_thread.quit)
+            self.worker.error.connect(self.worker.deleteLater)
+            self.analysis_thread.finished.connect(self.analysis_thread.deleteLater)
+
+            self.worker.finished.connect(self.loading_dialog.accept)
+            self.worker.error.connect(self.loading_dialog.reject)
+
+            self.analysis_thread.start()
+            self.loading_dialog.exec()
+
+        def on_analysis_success(self, result: AnalysisResult) -> None:
+            self.analyze_button.setEnabled(True)
+            self.last_result = result
             self._populate_table(self.last_result)
             self.equation_box.setHtml(self.last_result.equation_html)
             self.warning_label.setVisible(self.last_result.is_elemental_balance)
+            _status(
+                self.context,
+                f"Detected {len(self.last_result.matches)} environment types.",
+                3000,
+            )
 
-            if mol is None or mol.GetNumAtoms() == 0:
-                _status(self.context, "No molecule is loaded.", 3000)
-            else:
-                _status(
-                    self.context,
-                    f"Detected {len(self.last_result.matches)} environment types.",
-                    3000,
-                )
+        def on_analysis_error(self, error_msg: str) -> None:
+            self.analyze_button.setEnabled(True)
+            QMessageBox.critical(self, "Analysis Failed", f"An error occurred during analysis:\n{error_msg}")
+            _status(self.context, "Analysis failed.", 5000)
 
         def _populate_table(self, result: AnalysisResult) -> None:
             matches = result.matches
