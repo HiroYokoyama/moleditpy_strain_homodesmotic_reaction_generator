@@ -102,7 +102,8 @@ if QDialog is not None:
                 False,
             )
 
-            self.setWindowTitle("Strain Homodesmotic Reaction Generator")
+            from . import PLUGIN_VERSION
+            self.setWindowTitle(f"Strain Homodesmotic Reaction Generator (v{PLUGIN_VERSION})")
             self.resize(820, 640)
 
             layout = QVBoxLayout(self)

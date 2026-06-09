@@ -107,6 +107,7 @@ def test_export_analysis_writes_colored_html(tmp_path):
 
     text = output.read_text(encoding="utf-8")
     assert "<!doctype html>" in text
+    assert "v0.3.0" in text
     assert "row-ref" in text
     assert "<td>Ref</td>" in text
     assert "<td>primary carbon - ether oxygen - primary carbon</td>" in text
