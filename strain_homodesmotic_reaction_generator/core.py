@@ -35,6 +35,7 @@ class EnvironmentRule:
     smarts: str
     reference_smiles: str
     description: str
+    atom_centric: bool = False
 
 
 @dataclass(frozen=True)
@@ -184,8 +185,8 @@ ENVIRONMENTS: tuple[EnvironmentRule, ...] = (
 
     # Aromatics
     EnvironmentRule("Aromatic-CH", "[cX3H1]", "c1ccccc1", "Aromatic carbon-hydrogen bond in benzene ring."),
-    EnvironmentRule("Aromatic-C-Carbon", "[cX3H0]-[#6]", "Cc1ccccc1", "Aromatic carbon bonded to another carbon (alkyl or aryl single bond)."),
-    EnvironmentRule("Aromatic-fusion-carbon", "[cX3H0](:[c])(:[c]):[c]", "c1ccc2ccccc2c1", "Aromatic fusion carbon in naphthalene ring."),
+    EnvironmentRule("Aromatic-C-Carbon", "[cX3H0]-[#6]", "Cc1ccccc1", "Aromatic carbon bonded to another carbon (alkyl or aryl single bond).", atom_centric=True),
+    EnvironmentRule("Aromatic-fusion-carbon", "[cX3H0](:[c])(:[c]):[c]", "c1ccc2ccccc2c1", "Aromatic fusion carbon in naphthalene ring.", atom_centric=True),
 )
 
 
@@ -350,13 +351,18 @@ def explicit_hydrogen_copy(mol: Any) -> Any:
     return Chem.AddHs(mol) if mol is not None else None
 
 
-def unique_substructure_matches(mol: Any, smarts: str) -> set[tuple[int, ...]]:
+def unique_substructure_matches(
+    mol: Any, smarts: str, atom_centric: bool = False
+) -> set[tuple[int, ...]]:
     """Return canonicalized atom-index tuples for one SMARTS pattern."""
     _require_rdkit()
     pattern = Chem.MolFromSmarts(smarts)
     if pattern is None or mol is None:
         return set()
-    return {tuple(sorted(match)) for match in mol.GetSubstructMatches(pattern)}
+    matches = mol.GetSubstructMatches(pattern, uniquify=False)
+    if atom_centric:
+        return {(match[0],) for match in matches}
+    return {tuple(sorted(match)) for match in matches}
 
 
 def analyze_molecule(mol: Any) -> AnalysisResult:
@@ -387,7 +393,7 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
     rhs_terms: list[ReferenceTerm] = []
 
     for rule in ENVIRONMENTS:
-        count = len(unique_substructure_matches(mol, rule.smarts))
+        count = len(unique_substructure_matches(mol, rule.smarts, rule.atom_centric))
         if count == 0:
             continue
 
@@ -503,6 +509,8 @@ def reference_original_atom_indices(rule: EnvironmentRule) -> tuple[int, ...]:
     matches = ref_mol.GetSubstructMatches(pattern)
     if not matches:
         return ()
+    if rule.atom_centric:
+        return (matches[0][0],)
     return tuple(sorted(matches[0]))
 
 

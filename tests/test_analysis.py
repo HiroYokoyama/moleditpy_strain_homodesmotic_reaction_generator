@@ -211,6 +211,27 @@ def test_analyze_biphenyl_aromatic():
     assert "Aromatic-CH" in names
     assert "Aromatic-C-Carbon" in names
     assert not result.is_elemental_balance
+    assert "c1ccc(-c2ccccc2)cc1 + 1 cc (ethane) + 10 c1ccccc1 (benzene) -> 10 c1ccccc1 + 2 cc1ccccc1" in result.equation_text.lower()
+
+
+def test_analyze_five_cpp_aromatic():
+    mol = Chem.MolFromSmiles("c1cc2ccc1-c1ccc(cc1)-c1ccc(cc1)-c1ccc(cc1)-c1ccc-2cc1")
+    result = analyze_molecule(mol)
+    assert not result.is_elemental_balance
+    assert format_counter(result.target_atoms) == "C: 30, H: 20"
+    assert format_counter(result.reference_atoms) == "C: 190, H: 200"
+    assert format_counter(result.atom_delta) == "C: 160, H: 180"
+    
+    names_counts = {match.name: match.count for match in result.matches}
+    assert names_counts["Aromatic-CH"] == 20
+    assert names_counts["Aromatic-C-Carbon"] == 10
+    
+    left_names = {term.name: term.count for term in result.left_balance_terms}
+    assert left_names["Benzene"] == 25
+    assert left_names["ethane"] == 5
+    
+    right_active = [term for term in result.right_balance_terms if term.count > 0]
+    assert len(right_active) == 0
 
 
 def test_analyze_acetylene_sp():
