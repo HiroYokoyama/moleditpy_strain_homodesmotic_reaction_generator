@@ -20,6 +20,6 @@ PLUGIN_DESCRIPTION = (
 
 def initialize(context: Any) -> None:
     """Initialize the plugin inside MoleditPy."""
-    context.add_analysis_tool(PLUGIN_NAME, lambda: open_analyzer_dialog(context))
+    context.add_analysis_tool("Homodesmotic Reaction", lambda: open_analyzer_dialog(context))
     if hasattr(context, "show_status_message"):
-        context.show_status_message(f"{PLUGIN_NAME} loaded.", 3000)
+        context.show_status_message("Homodesmotic Reaction loaded.", 3000)
