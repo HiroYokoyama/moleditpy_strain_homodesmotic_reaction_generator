@@ -13,13 +13,13 @@ reference molecules for draft homodesmotic or isodesmic reaction balancing.
 
 ## Files
 
-- `strain_homodesmotic_reaction_generator.py` - plugin entry point.
+- `strain_homodesmotic_reaction_generator/` - plugin directory package.
 - `tests/test_analysis.py` - lightweight tests for the analysis/export logic.
 - `.github/workflows/ci.yml` - GitHub Actions CI workflow configuration.
 
 ## Install
 
-Copy or symlink `strain_homodesmotic_reaction_generator.py` into your MoleditPy user plugins directory (e.g. `~/.moleditpy/plugins/`). The plugin registers itself in the Analysis menu as **Strain Homodesmotic Reaction Generator**.
+Copy or symlink the `strain_homodesmotic_reaction_generator` folder into your MoleditPy user plugins directory (e.g. `~/.moleditpy/plugins/`). The plugin registers itself in the Analysis menu as **Strain Homodesmotic Reaction Generator**.
 
 ## Usage
 
