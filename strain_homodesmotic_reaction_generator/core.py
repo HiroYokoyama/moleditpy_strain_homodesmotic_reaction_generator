@@ -935,13 +935,66 @@ def _html_counter(values: Counter[str], color: str, title: str) -> str:
     )
 
 
-def _html_terms(terms: Iterable[BalanceTerm], color: str, title: str) -> str:
-    parts = [
-        f'{term.count} {color_smiles_atoms(term.smiles, color, title)} '
-        f'<span style="color:#9aa0a6;">({html.escape(term.name)})</span>'
-        for term in terms
-        if term.count > 0
-    ]
+_BALANCE_CORE_MAP: dict[str, tuple[int, ...]] = {
+    "C": (),
+    "CC": (),
+    "CCC": (1,),
+    "CCCC": (1, 2),
+    "CCCCC": (1, 2, 3),
+    "CCCCCC": (1, 2, 3, 4),
+    "COC": (1,),
+    "CCOC": (1, 2),
+    "CCOCC": (1, 2, 3),
+    "CC(C)C": (1,),
+    "CC(C)(C)C": (1,),
+    "COC(C)C": (1, 2),
+    "COC(C)(C)C": (1, 2),
+    "C=O": (0, 1),
+    "CC=O": (1, 2),
+    "CC(=O)C": (1, 2),
+    "N": (0,),
+    "CN": (1,),
+    "CNC": (1,),
+    "CN(C)C": (1,),
+    "C=C": (0, 1),
+    "CC=C": (1, 2),
+    "CC(=C)C": (1, 2),
+    "CC=CC": (1, 2),
+    "CC=C(C)C": (1, 2),
+    "CC(C)=C(C)C": (1, 3),
+    "C#C": (0, 1),
+    "CC#C": (1, 2),
+    "CC#CC": (1, 2),
+    "CC#N": (1, 2),
+    "c1ccccc1": (0, 1, 2, 3, 4, 5),
+    "Cc1ccccc1": (1, 2, 3, 4, 5, 6),
+    "c1ccc2ccccc2c1": (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
+}
+
+
+def _html_terms(
+    terms: Iterable[BalanceTerm],
+    core_color: str,
+    added_color: str,
+) -> str:
+    parts = []
+    for term in terms:
+        if term.count > 0:
+            core_indices = _BALANCE_CORE_MAP.get(term.smiles, ())
+            indexed_colors = {
+                idx: (core_color, "Balance species core environment atom")
+                for idx in core_indices
+            }
+            smiles = color_smiles_atoms_by_index(
+                term.smiles,
+                indexed_colors,
+                added_color,
+                "Added balancing atom",
+            )
+            parts.append(
+                f'{term.count} {smiles} '
+                f'<span style="color:#9aa0a6;">({html.escape(term.name)})</span>'
+            )
     return " + ".join(parts) if parts else "none"
 
 
@@ -963,8 +1016,8 @@ def build_equation_html(
     right_added_color = "#c58af9"
     unresolved_color = "#f28b82"
 
-    left_balance = _html_terms(left_balance_terms, left_added_color, "Added left-side balance species")
-    right_balance = _html_terms(right_balance_terms, right_added_color, "Added right-side balance species")
+    left_balance = _html_terms(left_balance_terms, target_color, left_added_color)
+    right_balance = _html_terms(right_balance_terms, target_color, right_added_color)
     unresolved_left = _html_counter(unresolved_left_atoms, unresolved_color, "Unresolved left-side atom")
     unresolved_right = _html_counter(unresolved_right_atoms, unresolved_color, "Unresolved right-side atom")
 

@@ -297,5 +297,26 @@ def test_analyze_propene_sp2():
     assert "C=CC -> 1 CC=C" in result.equation_text
 
 
+def test_analyze_cyclopropane_balance_species_colored():
+    mol = Chem.MolFromSmiles("C1CC1")
+    result = analyze_molecule(mol)
+    assert not result.is_elemental_balance
+    assert "C1CC1 + 3 CCC (propane) -> 3 CCCC" in result.equation_text
+    
+    # Check that propane (CCC) is colored atom-by-atom in HTML
+    # The middle carbon should be blue (#8ab4f8), outer carbons should be green (#81c995)
+    assert "color:#81c995" in result.equation_html
+    assert "color:#8ab4f8" in result.equation_html
+    
+    # Verify that the term "3 CCC" is constructed with mixed colors
+    # Atom 1 (middle) has core_color (#8ab4f8), Atom 0 & 2 have added_color (#81c995)
+    # The SMILES string is "CCC", so the first C is green, second C is blue, third C is green
+    import re
+    c_green = r'color:#81c995;[^>]*>C'
+    c_blue = r'color:#8ab4f8;[^>]*>C'
+    pattern = c_green + r'.*?' + c_blue + r'.*?' + c_green
+    assert re.search(pattern, result.equation_html) is not None
+
+
 
 
