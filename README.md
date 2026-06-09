@@ -4,8 +4,6 @@ This folder contains a MoleditPy plugin that detects common local bonding
 environments in strained or highly constrained molecules and proposes small
 reference molecules for draft homodesmotic or isodesmic reaction balancing.
 
-Version: `0.2.0`
-
 ## Features
 
 - **Expanded Support**: Auto-detects and balances ketones, aldehydes, amines (primary, secondary, tertiary), and extended alkanes.
