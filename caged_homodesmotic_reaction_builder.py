@@ -366,6 +366,7 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
             (),
             "No molecule is loaded.",
             "<p>No molecule is loaded.</p>",
+            False,
         )
 
     target_smiles = Chem.MolToSmiles(Chem.RemoveHs(mol), isomericSmiles=True)
@@ -456,6 +457,7 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         right_balance_terms,
         unresolved_left_atoms,
         unresolved_right_atoms,
+        not milp_success,
     )
     return AnalysisResult(
         target_smiles,
@@ -855,6 +857,7 @@ def build_equation_html(
     right_balance_terms: Iterable[BalanceTerm],
     unresolved_left_atoms: Counter[str],
     unresolved_right_atoms: Counter[str],
+    is_elemental_balance: bool = False,
 ) -> str:
     target_color = "#8ab4f8"
     reference_color = "#8ab4f8"
@@ -888,9 +891,14 @@ def build_equation_html(
     if unresolved_right != "none":
         rhs_parts.append(f'{_span("unresolved right species", unresolved_color)} ({unresolved_right})')
 
+    warning_html = ""
+    if is_elemental_balance:
+        warning_html = '<p style="color:#f28b82; font-weight:bold;">⚠️ Note: Calculated in elemental balance mode due to environment matching constraints.</p>'
+
     return (
         '<div style="font-family:Consolas, monospace; color:#e8eaed;">'
         '<h3 style="margin:0 0 8px 0; color:#e8eaed;">Homodesmotic Draft Equation</h3>'
+        f'{warning_html}'
         f'<p><span style="color:#9aa0a6;">Target atom count:</span> '
         f'{_html_counter(target_atoms, target_color, "Original target atom")}</p>'
         f'<p><span style="color:#9aa0a6;">Reference-side atom count:</span> '

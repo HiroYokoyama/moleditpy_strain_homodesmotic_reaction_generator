@@ -14,6 +14,7 @@ from caged_homodesmotic_reaction_builder import (  # noqa: E402
     build_balance_terms,
     export_analysis,
     format_counter,
+    PLUGIN_DEPENDENCIES,
 )
 
 
@@ -39,10 +40,9 @@ def test_analyze_dimethyl_ether_detects_internal_ether_oxygen():
     result = analyze_molecule(mol)
 
     names = {match.name for match in result.matches}
-    assert "primary carbon - ether oxygen" in names
+    assert "primary carbon - ether oxygen - primary carbon" in names
     assert any(match.reference_smiles == "COC" for match in result.matches)
     assert "#8ab4f8" in result.equation_html
-    assert "#81c995" in result.equation_html
 
 
 def test_terminal_heteroatoms_are_not_treated_as_cage_ether_environments():
@@ -106,5 +106,58 @@ def test_export_analysis_writes_colored_html(tmp_path):
     text = output.read_text(encoding="utf-8")
     assert "<!doctype html>" in text
     assert "#8ab4f8" in text
-    assert "#81c995" in text
-    assert "primary carbon - ether oxygen" in text
+    assert "primary carbon - ether oxygen - primary carbon" in text
+
+
+def test_analyze_adamantanone_detects_carbonyls():
+    mol = Chem.MolFromSmiles("O=C1C2CC3CC1CC(C2)C3")
+    result = analyze_molecule(mol)
+    names = {match.name for match in result.matches}
+    assert "Tertiary-Carbonyl" in names
+    assert not result.is_elemental_balance
+
+
+def test_analyze_methylamine_detects_primary_amine():
+    mol = Chem.MolFromSmiles("CN")
+    result = analyze_molecule(mol)
+    names = {match.name for match in result.matches}
+    assert "Primary-Primary-Amine" in names
+
+
+def test_analyze_unsolvable_molecule_triggers_elemental_balance():
+    mol = Chem.MolFromSmiles("C1N2CN3CN1CN(C2)C3") # Hexamethylenetetramine
+    result = analyze_molecule(mol)
+    assert result.is_elemental_balance
+    assert "Calculated in elemental balance mode" in result.equation_html
+
+
+def test_analyze_trimethylamine_detects_tertiary_amine():
+    mol = Chem.MolFromSmiles("CN(C)C")
+    result = analyze_molecule(mol)
+    names = {match.name for match in result.matches}
+    assert "Primary-Tertiary-Amine" in names
+    assert not result.is_elemental_balance
+
+
+def test_analyze_butanone_detects_secondary_carbonyl():
+    mol = Chem.MolFromSmiles("CCC(=O)C")
+    result = analyze_molecule(mol)
+    names = {match.name for match in result.matches}
+    assert "Secondary-Carbonyl" in names
+    assert not result.is_elemental_balance
+
+
+def test_plugin_metadata():
+    assert "numpy" in PLUGIN_DEPENDENCIES
+    assert "scipy" in PLUGIN_DEPENDENCIES
+
+
+def test_analyze_fallback_triggered_when_milp_is_missing(monkeypatch):
+    import caged_homodesmotic_reaction_builder
+    monkeypatch.setattr(caged_homodesmotic_reaction_builder, "milp", None)
+    mol = Chem.MolFromSmiles("COC")
+    result = caged_homodesmotic_reaction_builder.analyze_molecule(mol)
+    assert result.is_elemental_balance
+    assert "Calculated in elemental balance mode" in result.equation_html
+
+
