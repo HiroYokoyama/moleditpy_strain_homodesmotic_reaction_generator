@@ -185,8 +185,27 @@ ENVIRONMENTS: tuple[EnvironmentRule, ...] = (
 
     # Aromatics
     EnvironmentRule("Aromatic-CH", "[cX3H1]", "c1ccccc1", "Aromatic carbon-hydrogen bond in benzene ring."),
-    EnvironmentRule("Aromatic-C-Carbon", "[cX3H0]-[#6]", "Cc1ccccc1", "Aromatic carbon bonded to another carbon (alkyl or aryl single bond).", atom_centric=True),
-    EnvironmentRule("Aromatic-fusion-carbon", "[cX3H0](:[c])(:[c]):[c]", "c1ccc2ccccc2c1", "Aromatic fusion carbon in naphthalene ring.", atom_centric=True),
+    EnvironmentRule(
+        "Aromatic-C-Aromatic",
+        "[cX3H0]-[c]",
+        "c1ccc(-c2ccccc2)cc1",
+        "Aromatic carbon bonded to another aromatic carbon (biaryl linkage).",
+        atom_centric=True,
+    ),
+    EnvironmentRule(
+        "Aromatic-C-Carbon",
+        "[cX3H0]-[!a&#6]",
+        "Cc1ccccc1",
+        "Aromatic carbon bonded to a non-aromatic carbon.",
+        atom_centric=True,
+    ),
+    EnvironmentRule(
+        "Aromatic-fusion-carbon",
+        "[cX3H0](:[c])(:[c]):[c]",
+        "c1ccc2ccccc2c1",
+        "Aromatic fusion carbon in naphthalene ring.",
+        atom_centric=True,
+    ),
 )
 
 
@@ -223,6 +242,7 @@ BALANCE_SPECIES: tuple[BalanceSpecies, ...] = (
     BalanceSpecies("Acetonitrile", "CC#N", "Simplest nitrile"),
     BalanceSpecies("Benzene", "c1ccccc1", "Simplest aromatic hydrocarbon"),
     BalanceSpecies("Toluene", "Cc1ccccc1", "Methyl-substituted benzene"),
+    BalanceSpecies("Biphenyl", "c1ccc(-c2ccccc2)cc1", "Simplest biaryl aromatic hydrocarbon"),
     BalanceSpecies("Naphthalene", "c1ccc2ccccc2c1", "Fused two-ring aromatic hydrocarbon"),
 )
 
@@ -265,6 +285,9 @@ class AnalysisResult:
     equation_text: str
     equation_html: str
     is_elemental_balance: bool
+    target_bonds: Counter[str]
+    reaction_bonds_delta: Counter[str]
+    reaction_type: str
 
 
 def _require_rdkit() -> None:
@@ -346,6 +369,162 @@ def count_groups(mol: Any) -> Counter[str]:
     return counts
 
 
+def get_atom_state(atom: Any) -> str:
+    """Return a string representation of an atom's hybridization and hydrogen count."""
+    symbol = atom.GetSymbol()
+    if symbol == "H":
+        return "H"
+    hyb = str(atom.GetHybridization()).lower()
+    h_count = atom.GetTotalNumHs()
+    return f"{symbol}({hyb},H{h_count})"
+
+
+def bond_counts(mol: Any) -> Counter[str]:
+    """Return bond type counts for an RDKit molecule."""
+    counts: Counter[str] = Counter()
+    if mol is None:
+        return counts
+    mol_with_hs = explicit_hydrogen_copy(mol)
+    return bond_counts_helper(mol_with_hs)
+
+
+def bond_counts_helper(mol: Any) -> Counter[str]:
+    """Return bond type counts for a molecule that already has explicit hydrogens."""
+    counts: Counter[str] = Counter()
+    if mol is None:
+        return counts
+    for bond in mol.GetBonds():
+        a1 = bond.GetBeginAtom().GetSymbol()
+        a2 = bond.GetEndAtom().GetSymbol()
+        pair = sorted([a1, a2])
+        btype = bond.GetBondType()
+        if btype == Chem.BondType.SINGLE:
+            suffix = " (single)"
+        elif btype == Chem.BondType.DOUBLE:
+            suffix = " (double)"
+        elif btype == Chem.BondType.TRIPLE:
+            suffix = " (triple)"
+        elif btype == Chem.BondType.AROMATIC:
+            suffix = " (aromatic)"
+        else:
+            suffix = f" ({str(btype).lower()})"
+        counts[f"{pair[0]}-{pair[1]}{suffix}"] += 1
+    return counts
+
+
+def classify_reaction_type(
+    target_smiles: str,
+    left_balance_terms: tuple[BalanceTerm, ...],
+    rhs_terms: tuple[ReferenceTerm, ...],
+    right_balance_terms: tuple[BalanceTerm, ...],
+    unresolved_left_atoms: Counter[str],
+    unresolved_right_atoms: Counter[str],
+) -> str:
+    """Determine the classification of the reaction based on conservation of groups and bonds."""
+    if unresolved_left_atoms or unresolved_right_atoms:
+        return "Unbalanced"
+
+    def get_mol(smiles: str) -> Any:
+        if not smiles:
+            return None
+        m = Chem.MolFromSmiles(smiles)
+        return Chem.AddHs(m) if m is not None else None
+
+    # Gather LHS molecules
+    lhs_mols: list[tuple[Any, int]] = []
+    t_mol = get_mol(target_smiles)
+    if t_mol is not None:
+        lhs_mols.append((t_mol, 1))
+    for term in left_balance_terms:
+        if term.count > 0:
+            m = get_mol(term.smiles)
+            if m is not None:
+                lhs_mols.append((m, term.count))
+
+    # Gather RHS molecules
+    rhs_mols: list[tuple[Any, int]] = []
+    for term in rhs_terms:
+        if term.count > 0:
+            m = get_mol(term.smiles)
+            if m is not None:
+                rhs_mols.append((m, term.count))
+    for term in right_balance_terms:
+        if term.count > 0:
+            m = get_mol(term.smiles)
+            if m is not None:
+                rhs_mols.append((m, term.count))
+
+    # 1. Elemental Balance check
+    lhs_atoms: Counter[str] = Counter()
+    for mol, count in lhs_mols:
+        for atom in mol.GetAtoms():
+            lhs_atoms[atom.GetSymbol()] += count
+
+    rhs_atoms: Counter[str] = Counter()
+    for mol, count in rhs_mols:
+        for atom in mol.GetAtoms():
+            rhs_atoms[atom.GetSymbol()] += count
+
+    if lhs_atoms != rhs_atoms:
+        return "Unbalanced"
+
+    # 2. Hyperhomodesmotic check (LHS groups == RHS groups)
+    lhs_groups: Counter[str] = Counter()
+    for mol, count in lhs_mols:
+        for group, grp_count in count_groups(Chem.RemoveHs(mol)).items():
+            lhs_groups[group] += grp_count * count
+
+    rhs_groups: Counter[str] = Counter()
+    for mol, count in rhs_mols:
+        for group, grp_count in count_groups(Chem.RemoveHs(mol)).items():
+            rhs_groups[group] += grp_count * count
+
+    if lhs_groups == rhs_groups:
+        return "Hyperhomodesmotic"
+
+    # 3. Homodesmotic check (LHS hybridized bonds == RHS hybridized bonds)
+    def get_hybridized_bonds(m: Any) -> Counter[str]:
+        bonds: Counter[str] = Counter()
+        if m is None:
+            return bonds
+        for bond in m.GetBonds():
+            a1 = get_atom_state(bond.GetBeginAtom())
+            a2 = get_atom_state(bond.GetEndAtom())
+            pair = "-".join(sorted([a1, a2]))
+            btype = bond.GetBondType()
+            bonds[f"{pair} ({str(btype).lower()})"] += 1
+        return bonds
+
+    lhs_hyb_bonds: Counter[str] = Counter()
+    for mol, count in lhs_mols:
+        for btype, b_count in get_hybridized_bonds(mol).items():
+            lhs_hyb_bonds[btype] += b_count * count
+
+    rhs_hyb_bonds: Counter[str] = Counter()
+    for mol, count in rhs_mols:
+        for btype, b_count in get_hybridized_bonds(mol).items():
+            rhs_hyb_bonds[btype] += b_count * count
+
+    if lhs_hyb_bonds == rhs_hyb_bonds:
+        return "Homodesmotic"
+
+    # 4. Isodesmic check (LHS simple bonds == RHS simple bonds)
+    lhs_simple_bonds: Counter[str] = Counter()
+    for mol, count in lhs_mols:
+        for btype, b_count in bond_counts_helper(mol).items():
+            lhs_simple_bonds[btype] += b_count * count
+
+    rhs_simple_bonds: Counter[str] = Counter()
+    for mol, count in rhs_mols:
+        for btype, b_count in bond_counts_helper(mol).items():
+            rhs_simple_bonds[btype] += b_count * count
+
+    if lhs_simple_bonds == rhs_simple_bonds:
+        return "Isodesmic"
+
+    return "Elemental Balance"
+
+
 def explicit_hydrogen_copy(mol: Any) -> Any:
     """Return a copy with explicit hydrogens without mutating the host molecule."""
     _require_rdkit()
@@ -383,6 +562,9 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
             "No molecule is loaded.",
             "<p>No molecule is loaded.</p>",
             False,
+            Counter(),
+            Counter(),
+            "Unbalanced",
         )
 
     target_smiles = Chem.MolToSmiles(Chem.RemoveHs(mol), isomericSmiles=True)
@@ -530,6 +712,46 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         if delta != 0:
             atom_delta[element] = delta
 
+    target_bonds = bond_counts(mol)
+
+    lhs_bonds = Counter(target_bonds)
+    for term in left_balance_terms:
+        if term.count > 0:
+            b_mol = Chem.MolFromSmiles(term.smiles)
+            if b_mol is not None:
+                for btype, bcount in bond_counts(b_mol).items():
+                    lhs_bonds[btype] += bcount * term.count
+
+    rhs_bonds = Counter()
+    for term in rhs_terms:
+        if term.count > 0:
+            b_mol = Chem.MolFromSmiles(term.smiles)
+            if b_mol is not None:
+                for btype, bcount in bond_counts(b_mol).items():
+                    rhs_bonds[btype] += bcount * term.count
+
+    for term in right_balance_terms:
+        if term.count > 0:
+            b_mol = Chem.MolFromSmiles(term.smiles)
+            if b_mol is not None:
+                for btype, bcount in bond_counts(b_mol).items():
+                    rhs_bonds[btype] += bcount * term.count
+
+    reaction_bonds_delta = Counter()
+    for btype in sorted(set(lhs_bonds) | set(rhs_bonds)):
+        diff = rhs_bonds[btype] - lhs_bonds[btype]
+        if diff != 0:
+            reaction_bonds_delta[btype] = diff
+
+    reaction_type = classify_reaction_type(
+        target_smiles,
+        left_balance_terms,
+        rhs_terms,
+        right_balance_terms,
+        unresolved_left_atoms,
+        unresolved_right_atoms,
+    )
+
     equation_text = build_equation_text(
         target_smiles,
         target_atoms,
@@ -540,6 +762,9 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         right_balance_terms,
         unresolved_left_atoms,
         unresolved_right_atoms,
+        target_bonds,
+        reaction_bonds_delta,
+        reaction_type,
     )
     equation_html = build_equation_html(
         target_smiles,
@@ -552,6 +777,9 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         unresolved_left_atoms,
         unresolved_right_atoms,
         not milp_success,
+        target_bonds,
+        reaction_bonds_delta,
+        reaction_type,
     )
     return AnalysisResult(
         target_smiles,
@@ -566,6 +794,9 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         equation_text,
         equation_html,
         not milp_success,
+        target_bonds,
+        reaction_bonds_delta,
+        reaction_type,
     )
 
 
@@ -782,6 +1013,9 @@ def build_equation_text(
     right_balance_terms: Iterable[BalanceTerm],
     unresolved_left_atoms: Counter[str],
     unresolved_right_atoms: Counter[str],
+    target_bonds: Counter[str],
+    reaction_bonds_delta: Counter[str],
+    reaction_type: str,
 ) -> str:
     left_balance = format_terms(left_balance_terms)
     right_balance = format_terms(right_balance_terms)
@@ -806,9 +1040,12 @@ def build_equation_text(
         "Homodesmotic Draft Equation\n"
         "===========================\n\n"
         f"{lhs} -> {rhs}\n\n"
+        f"Reaction type: {reaction_type}\n\n"
         f"Target atom count: {format_counter(target_atoms)}\n"
         f"Reference-side atom count: {format_counter(reference_atoms)}\n"
         f"Reference minus target atom delta: {format_counter(atom_delta)}\n\n"
+        f"Target bond counts: {format_counter(target_bonds)}\n"
+        f"Reaction bond difference: {format_counter(reaction_bonds_delta)}\n\n"
         f"Left-side balancing species: {left_balance}\n"
         f"Right-side balancing species: {right_balance}\n"
         f"Unresolved left-side atoms: {unresolved_left}\n"
@@ -980,6 +1217,7 @@ _BALANCE_CORE_MAP: dict[str, tuple[int, ...]] = {
     "CC#N": (1, 2),
     "c1ccccc1": (0, 1, 2, 3, 4, 5),
     "Cc1ccccc1": (1, 2, 3, 4, 5, 6),
+    "c1ccc(-c2ccccc2)cc1": (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
     "c1ccc2ccccc2c1": (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
 }
 
@@ -1010,6 +1248,18 @@ def _html_terms(
     return " + ".join(parts) if parts else "none"
 
 
+def get_reaction_type_color(rtype: str) -> str:
+    if rtype == "Hyperhomodesmotic":
+        return "#81c995"  # Vibrant light green
+    elif rtype == "Homodesmotic":
+        return "#8ab4f8"  # Sky blue
+    elif rtype == "Isodesmic":
+        return "#fde293"  # Yellow
+    elif rtype == "Elemental Balance":
+        return "#c58af9"  # Purple
+    return "#f28b82"  # Red / pink for Unbalanced
+
+
 def build_equation_html(
     target_smiles: str,
     target_atoms: Counter[str],
@@ -1021,6 +1271,9 @@ def build_equation_html(
     unresolved_left_atoms: Counter[str],
     unresolved_right_atoms: Counter[str],
     is_elemental_balance: bool = False,
+    target_bonds: Counter[str] = None,
+    reaction_bonds_delta: Counter[str] = None,
+    reaction_type: str = "Unbalanced",
 ) -> str:
     target_color = "#8ab4f8"
     reference_color = "#8ab4f8"
@@ -1028,6 +1281,11 @@ def build_equation_html(
     left_added_color = "#81c995"
     right_added_color = "#c58af9"
     unresolved_color = "#f28b82"
+
+    if target_bonds is None:
+        target_bonds = Counter()
+    if reaction_bonds_delta is None:
+        reaction_bonds_delta = Counter()
 
     left_balance = _html_terms(left_balance_terms, balance_core_color, left_added_color)
     right_balance = _html_terms(right_balance_terms, balance_core_color, right_added_color)
@@ -1094,12 +1352,18 @@ def build_equation_html(
         f'<p style="font-size:16px; font-weight:500; line-height:1.6; margin:16px 0;">{" + ".join(lhs_parts)} '
         f'<span style="color:#e8eaed;">-&gt;</span> {" + ".join(rhs_parts)}</p>'
         '<hr style="border:0; border-top:1px solid #3c4043;">'
+        f'<p><span style="color:#9aa0a6;">Reaction Type:</span> '
+        f'<span style="color:{get_reaction_type_color(reaction_type)}; font-weight:bold;">{reaction_type}</span></p>'
         f'<p><span style="color:#9aa0a6;">Target atom count:</span> '
         f'{_html_counter(target_atoms, "#e8eaed", "Target atom")}</p>'
         f'<p><span style="color:#9aa0a6;">Reference-side atom count:</span> '
         f'{_html_counter(reference_atoms, "#e8eaed", "Reference atom")}</p>'
         f'<p><span style="color:#9aa0a6;">Reference minus target atom delta:</span> '
         f'{_html_counter(atom_delta, "#e8eaed", "Atom-count difference")}</p>'
+        f'<p><span style="color:#9aa0a6;">Target bond counts:</span> '
+        f'{_html_counter(target_bonds, "#e8eaed", "Target bond")}</p>'
+        f'<p><span style="color:#9aa0a6;">Reaction bond difference:</span> '
+        f'{_html_counter(reaction_bonds_delta, "#e8eaed", "Reaction bond difference")}</p>'
         f'<p><span style="color:#9aa0a6;">Left-side balancing species:</span> {left_balance}</p>'
         f'<p><span style="color:#9aa0a6;">Right-side balancing species:</span> {right_balance}</p>'
         f'<p><span style="color:#9aa0a6;">Unresolved left-side atoms:</span> {unresolved_left}</p>'
@@ -1324,9 +1588,12 @@ def export_analysis(
                 [match.name, match.count, match.reference_smiles, match.description]
             )
         writer.writerow([])
+        writer.writerow(["Reaction Type", result.reaction_type])
         writer.writerow(["Target atom count", format_counter(result.target_atoms)])
         writer.writerow(["Reference-side atom count", format_counter(result.reference_atoms)])
         writer.writerow(["Reference minus target atom delta", format_counter(result.atom_delta)])
+        writer.writerow(["Target bond counts", format_counter(result.target_bonds)])
+        writer.writerow(["Reaction bond difference", format_counter(result.reaction_bonds_delta)])
         writer.writerow(["Left-side balancing species", format_terms(result.left_balance_terms)])
         writer.writerow(["Right-side balancing species", format_terms(result.right_balance_terms)])
         writer.writerow(["Unresolved left-side atoms", format_counter(result.unresolved_left_atoms)])

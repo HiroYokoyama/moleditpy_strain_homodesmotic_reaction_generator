@@ -117,16 +117,16 @@ def test_export_analysis_writes_colored_html(tmp_path):
     assert "<td>Ref</td>" in text
     assert "<td>primary carbon - ether oxygen - primary carbon</td>" in text
 
-    # Biphenyl (has left balance)
-    result_biphenyl = analyze_molecule(Chem.MolFromSmiles("c1ccccc1-c2ccccc2"))
-    output_biphenyl = tmp_path / "analysis_biphenyl.html"
-    export_analysis(output_biphenyl, result_biphenyl)
-    text_biphenyl = output_biphenyl.read_text(encoding="utf-8")
-    assert "<td>Ref</td>" in text_biphenyl
-    assert "<td>Aromatic-CH</td>" in text_biphenyl
-    assert "<td>Left Balance</td>" in text_biphenyl
-    assert "<td>ethane</td>" in text_biphenyl
-    assert "<td>Two-carbon saturated hydrocarbon balance species.</td>" in text_biphenyl
+    # Cyclopropane (has left balance)
+    result_cyclopropane = analyze_molecule(Chem.MolFromSmiles("C1CC1"))
+    output_cyclopropane = tmp_path / "analysis_cyclopropane.html"
+    export_analysis(output_cyclopropane, result_cyclopropane)
+    text_cyclopropane = output_cyclopropane.read_text(encoding="utf-8")
+    assert "<td>Ref</td>" in text_cyclopropane
+    assert "<td>secondary carbon - secondary carbon</td>" in text_cyclopropane
+    assert "<td>Left Balance</td>" in text_cyclopropane
+    assert "<td>propane</td>" in text_cyclopropane
+    assert "<td>Three-carbon saturated hydrocarbon balance species.</td>" in text_cyclopropane
 
 
 def test_export_analysis_writes_txt(tmp_path):
@@ -228,9 +228,9 @@ def test_analyze_biphenyl_aromatic():
     result = analyze_molecule(mol)
     names = {match.name for match in result.matches}
     assert "Aromatic-CH" in names
-    assert "Aromatic-C-Carbon" in names
+    assert "Aromatic-C-Aromatic" in names
     assert not result.is_elemental_balance
-    assert "c1ccc(-c2ccccc2)cc1 + 1 cc (ethane) -> 2 cc1ccccc1" in result.equation_text.lower()
+    assert "c1ccc(-c2ccccc2)cc1 -> 1 c1ccc(-c2ccccc2)cc1" in result.equation_text.lower()
 
 
 def test_analyze_five_cpp_aromatic():
@@ -238,16 +238,16 @@ def test_analyze_five_cpp_aromatic():
     result = analyze_molecule(mol)
     assert not result.is_elemental_balance
     assert format_counter(result.target_atoms) == "C: 30, H: 20"
-    assert format_counter(result.reference_atoms) == "C: 70, H: 80"
-    assert format_counter(result.atom_delta) == "C: 40, H: 60"
+    assert format_counter(result.reference_atoms) == "C: 60, H: 50"
+    assert format_counter(result.atom_delta) == "C: 30, H: 30"
     
     names_counts = {match.name: match.count for match in result.matches}
     assert names_counts["Aromatic-CH"] == 20
-    assert names_counts["Aromatic-C-Carbon"] == 10
+    assert names_counts["Aromatic-C-Aromatic"] == 10
     
-    left_names = {term.name: term.count for term in result.left_balance_terms}
+    left_names = {term.name: term.count for term in result.left_balance_terms if term.count > 0}
     assert left_names["Benzene"] == 5
-    assert left_names["ethane"] == 5
+    assert "ethane" not in left_names
     
     right_active = [term for term in result.right_balance_terms if term.count > 0]
     assert len(right_active) == 0
@@ -320,6 +320,31 @@ def test_analyze_cyclopropane_balance_species_colored():
     # C1 (green), C2 (yellow), C3 (blue), C4 (green)
     pattern_butane = r'3\s+<span\s+style="color:#81c995;[^>]*>C</span><span\s+style="color:#fde293;[^>]*>C</span><span\s+style="color:#8ab4f8;[^>]*>C</span><span\s+style="color:#81c995;[^>]*>C</span>'
     assert re.search(pattern_butane, result.equation_html) is not None
+
+
+def test_bond_type_analysis():
+    # Ethane should have 1 C-C single bond and 6 C-H single bonds
+    mol = Chem.MolFromSmiles("CC")
+    result = analyze_molecule(mol)
+    assert result.target_bonds["C-C (single)"] == 1
+    assert result.target_bonds["C-H (single)"] == 6
+    # Perfectly balanced, so reaction bond delta should be empty (none)
+    assert format_counter(result.reaction_bonds_delta) == "none"
+
+
+def test_reaction_type_classification():
+    # Ethane should be classified as Hyperhomodesmotic
+    result_ethane = analyze_molecule(Chem.MolFromSmiles("CC"))
+    assert result_ethane.reaction_type == "Hyperhomodesmotic"
+
+    # [5]CPP should also be classified as Hyperhomodesmotic
+    result_cpp = analyze_molecule(Chem.MolFromSmiles("c1cc2ccc1-c1ccc(cc1)-c1ccc(cc1)-c1ccc(cc1)-c1ccc-2cc1"))
+    assert result_cpp.reaction_type == "Hyperhomodesmotic"
+
+    # Hexamethylenetetramine has environment matching constraints, falling back to Elemental Balance
+    result_hmta = analyze_molecule(Chem.MolFromSmiles("C1N2CN3CN1CN(C2)C3"))
+    assert result_hmta.reaction_type == "Elemental Balance"
+
 
 
 
