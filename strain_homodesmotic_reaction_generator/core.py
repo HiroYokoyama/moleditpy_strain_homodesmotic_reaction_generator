@@ -981,6 +981,7 @@ def build_equation_html(
         " + ".join(
             color_reference_term(term, reference_color, left_added_color)
             for term in rhs_terms
+            if term.count > 0
         )
         or "no reference molecules detected"
     ]
