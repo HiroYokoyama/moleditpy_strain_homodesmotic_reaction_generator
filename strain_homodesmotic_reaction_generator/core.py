@@ -175,6 +175,17 @@ ENVIRONMENTS: tuple[EnvironmentRule, ...] = (
     EnvironmentRule("Internal-alkene", "[CX3H1]=[CX3H1]", "CC=CC", "2-Butene-like double bond."),
     EnvironmentRule("Internal-branched-alkene", "[CX3H0]=[CX3H1]", "CC=C(C)C", "2-Methyl-2-butene-like double bond."),
     EnvironmentRule("Tetrasubstituted-alkene", "[CX3H0]=[CX3H0]", "CC(C)=C(C)C", "Tetramethylethene-like double bond."),
+
+    # Alkynes & Nitriles
+    EnvironmentRule("Terminal-alkyne", "[CX2H1]#[CX2H1]", "C#C", "Ethyne-like triple bond."),
+    EnvironmentRule("Substituted-alkyne", "[CX2H1]#[CX2H0]", "CC#C", "Propyne-like triple bond."),
+    EnvironmentRule("Internal-alkyne", "[CX2H0]#[CX2H0]", "CC#CC", "2-Butyne-like triple bond."),
+    EnvironmentRule("Nitrile", "[CX2H0]#[NX1]", "CC#N", "Acetonitrile-like triple bond."),
+
+    # Aromatics
+    EnvironmentRule("Aromatic-CH", "[cX3H1]", "c1ccccc1", "Aromatic carbon-hydrogen bond in benzene ring."),
+    EnvironmentRule("Aromatic-C-Carbon", "[cX3H0]-[#6]", "Cc1ccccc1", "Aromatic carbon bonded to another carbon (alkyl or aryl single bond)."),
+    EnvironmentRule("Aromatic-fusion-carbon", "[cX3H0](:[c])(:[c]):[c]", "c1ccc2ccccc2c1", "Aromatic fusion carbon in naphthalene ring."),
 )
 
 
@@ -205,6 +216,13 @@ BALANCE_SPECIES: tuple[BalanceSpecies, ...] = (
     BalanceSpecies("2-Butene", "CC=CC", "Internal alkene"),
     BalanceSpecies("2-Methyl-2-butene", "CC=C(C)C", "Trisubstituted alkene"),
     BalanceSpecies("2,3-Dimethyl-2-butene", "CC(C)=C(C)C", "Tetrasubstituted alkene"),
+    BalanceSpecies("Ethyne", "C#C", "Simplest alkyne"),
+    BalanceSpecies("Propyne", "CC#C", "Three-carbon alkyne"),
+    BalanceSpecies("2-Butyne", "CC#CC", "Internal alkyne"),
+    BalanceSpecies("Acetonitrile", "CC#N", "Simplest nitrile"),
+    BalanceSpecies("Benzene", "c1ccccc1", "Simplest aromatic hydrocarbon"),
+    BalanceSpecies("Toluene", "Cc1ccccc1", "Methyl-substituted benzene"),
+    BalanceSpecies("Naphthalene", "c1ccc2ccccc2c1", "Fused two-ring aromatic hydrocarbon"),
 )
 
 
@@ -273,37 +291,56 @@ def count_groups(mol: Any) -> Counter[str]:
         if atomic_num == 1:
             continue
         if atomic_num == 8:
-            if atom.GetDegree() == 1:
+            if atom.GetIsAromatic():
+                counts["O_ar"] += 1
+            elif atom.GetDegree() == 1:
                 counts["=O"] += 1
             else:
                 counts["O(C)(C)"] += 1
         elif atomic_num == 7:
             h_count = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 1)
-            counts[f"N(H{h_count})"] += 1
+            if atom.GetIsAromatic():
+                counts[f"N_ar(H{h_count})"] += 1
+            else:
+                counts[f"N(H{h_count})"] += 1
         elif atomic_num == 6:
             h_count = 0
-            o_count = 0
-            n_count = 0
-            carbonyl_o = 0
+            o_single = 0
+            o_double = 0
+            n_single = 0
+            n_double = 0
+            n_triple = 0
             c_double = 0
+            c_triple = 0
+            c_aromatic = 0
             for bond in atom.GetBonds():
                 neighbor = bond.GetOtherAtom(atom)
                 if neighbor.GetAtomicNum() == 1:
                     h_count += 1
                 elif neighbor.GetAtomicNum() == 8:
                     if bond.GetBondType() == Chem.BondType.DOUBLE:
-                        carbonyl_o += 1
+                        o_double += 1
                     else:
-                        o_count += 1
+                        o_single += 1
                 elif neighbor.GetAtomicNum() == 7:
-                    n_count += 1
+                    if bond.GetBondType() == Chem.BondType.DOUBLE:
+                        n_double += 1
+                    elif bond.GetBondType() == Chem.BondType.TRIPLE:
+                        n_triple += 1
+                    else:
+                        n_single += 1
                 elif neighbor.GetAtomicNum() == 6:
                     if bond.GetBondType() == Chem.BondType.DOUBLE:
                         c_double += 1
-            if carbonyl_o:
-                counts[f"C(=O)(H{h_count})(O{o_count})(N{n_count})(=C{c_double})"] += 1
+                    elif bond.GetBondType() == Chem.BondType.TRIPLE:
+                        c_triple += 1
+                    elif bond.GetBondType() == Chem.BondType.AROMATIC:
+                        c_aromatic += 1
+            
+            if atom.GetIsAromatic():
+                counts[f"C_ar(H{h_count})(O_s{o_single})(O_d{o_double})(N_s{n_single})(N_d{n_double})(N_t{n_triple})(ar{c_aromatic})"] += 1
             else:
-                counts[f"C(H{h_count})(O{o_count})(N{n_count})(=C{c_double})"] += 1
+                counts[f"C(H{h_count})(O_s{o_single})(O_d{o_double})(N_s{n_single})(N_d{n_double})(N_t{n_triple})(=C{c_double})(#C{c_triple})"] += 1
     return counts
 
 

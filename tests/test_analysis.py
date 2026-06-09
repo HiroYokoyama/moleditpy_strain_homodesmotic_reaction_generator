@@ -162,3 +162,88 @@ def test_analyze_fallback_triggered_when_milp_is_missing(monkeypatch):
     assert "Calculated in elemental balance mode" in result.equation_html
 
 
+def test_analyze_benzene_aromatic():
+    mol = Chem.MolFromSmiles("c1ccccc1")
+    result = analyze_molecule(mol)
+    assert len(result.matches) == 1
+    assert result.matches[0].name == "Aromatic-CH"
+    assert result.matches[0].count == 6
+    assert not result.is_elemental_balance
+    assert "c1ccccc1 + 5 c1ccccc1 (Benzene) -> 6 c1ccccc1" in result.equation_text
+
+
+def test_analyze_toluene_aromatic():
+    mol = Chem.MolFromSmiles("Cc1ccccc1")
+    result = analyze_molecule(mol)
+    names = {match.name for match in result.matches}
+    assert "Aromatic-CH" in names
+    assert "Aromatic-C-Carbon" in names
+    assert not result.is_elemental_balance
+    assert "Cc1ccccc1 + 5 c1ccccc1 (Benzene) -> 5 c1ccccc1 + 1 Cc1ccccc1" in result.equation_text
+
+
+def test_analyze_naphthalene_aromatic():
+    mol = Chem.MolFromSmiles("c1ccc2ccccc2c1")
+    result = analyze_molecule(mol)
+    names = {match.name for match in result.matches}
+    assert "Aromatic-CH" in names
+    assert "Aromatic-fusion-carbon" in names
+    assert not result.is_elemental_balance
+
+
+def test_analyze_biphenyl_aromatic():
+    mol = Chem.MolFromSmiles("c1ccccc1-c2ccccc2")
+    result = analyze_molecule(mol)
+    names = {match.name for match in result.matches}
+    assert "Aromatic-CH" in names
+    assert "Aromatic-C-Carbon" in names
+    assert not result.is_elemental_balance
+
+
+def test_analyze_acetylene_sp():
+    mol = Chem.MolFromSmiles("C#C")
+    result = analyze_molecule(mol)
+    names = {match.name for match in result.matches}
+    assert "Terminal-alkyne" in names
+    assert not result.is_elemental_balance
+    assert "C#C -> 1 C#C" in result.equation_text
+
+
+def test_analyze_propyne_sp():
+    mol = Chem.MolFromSmiles("CC#C")
+    result = analyze_molecule(mol)
+    names = {match.name for match in result.matches}
+    assert "Substituted-alkyne" in names
+    assert not result.is_elemental_balance
+    assert "C#CC -> 1 CC#C" in result.equation_text
+
+
+def test_analyze_acetonitrile_sp():
+    mol = Chem.MolFromSmiles("CC#N")
+    result = analyze_molecule(mol)
+    names = {match.name for match in result.matches}
+    assert "Nitrile" in names
+    assert not result.is_elemental_balance
+    assert "CC#N -> 1 CC#N" in result.equation_text
+
+
+def test_analyze_ethene_sp2():
+    mol = Chem.MolFromSmiles("C=C")
+    result = analyze_molecule(mol)
+    names = {match.name for match in result.matches}
+    assert "Secondary-alkene" in names
+    assert not result.is_elemental_balance
+    assert "C=C -> 1 C=C" in result.equation_text
+
+
+def test_analyze_propene_sp2():
+    mol = Chem.MolFromSmiles("CC=C")
+    result = analyze_molecule(mol)
+    names = {match.name for match in result.matches}
+    assert "Tertiary-alkene" in names
+    assert not result.is_elemental_balance
+    assert "C=CC -> 1 CC=C" in result.equation_text
+
+
+
+
