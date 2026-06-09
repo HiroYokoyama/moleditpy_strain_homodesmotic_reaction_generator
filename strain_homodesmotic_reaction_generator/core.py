@@ -804,6 +804,7 @@ def build_equation_text(
     return (
         "Homodesmotic Draft Equation\n"
         "===========================\n\n"
+        f"{lhs} -> {rhs}\n\n"
         f"Target atom count: {format_counter(target_atoms)}\n"
         f"Reference-side atom count: {format_counter(reference_atoms)}\n"
         f"Reference minus target atom delta: {format_counter(atom_delta)}\n\n"
@@ -811,7 +812,6 @@ def build_equation_text(
         f"Right-side balancing species: {right_balance}\n"
         f"Unresolved left-side atoms: {unresolved_left}\n"
         f"Unresolved right-side atoms: {unresolved_right}\n\n"
-        f"{lhs} -> {rhs}\n\n"
         "Energy expression template\n"
         "--------------------------\n"
         "Strain or stabilization energy can be estimated from a balanced reaction:\n"
@@ -998,6 +998,9 @@ def build_equation_html(
         '<div style="font-family:Consolas, monospace; color:#e8eaed;">'
         '<h3 style="margin:0 0 8px 0; color:#e8eaed;">Homodesmotic Draft Equation</h3>'
         f'{warning_html}'
+        f'<p style="font-size:16px; font-weight:500; line-height:1.6; margin:16px 0;">{" + ".join(lhs_parts)} '
+        f'<span style="color:#e8eaed;">-&gt;</span> {" + ".join(rhs_parts)}</p>'
+        '<hr style="border:0; border-top:1px solid #3c4043;">'
         f'<p><span style="color:#9aa0a6;">Target atom count:</span> '
         f'{_html_counter(target_atoms, "#e8eaed", "Target atom")}</p>'
         f'<p><span style="color:#9aa0a6;">Reference-side atom count:</span> '
@@ -1008,9 +1011,6 @@ def build_equation_html(
         f'<p><span style="color:#9aa0a6;">Right-side balancing species:</span> {right_balance}</p>'
         f'<p><span style="color:#9aa0a6;">Unresolved left-side atoms:</span> {unresolved_left}</p>'
         f'<p><span style="color:#9aa0a6;">Unresolved right-side atoms:</span> {unresolved_right}</p>'
-        '<hr style="border:0; border-top:1px solid #3c4043;">'
-        f'<p style="font-size:16px; font-weight:500; line-height:1.6; margin:16px 0;">{" + ".join(lhs_parts)} '
-        f'<span style="color:#e8eaed;">-&gt;</span> {" + ".join(rhs_parts)}</p>'
         '<p style="color:#9aa0a6;">Blue = original target and reference cores, '
         'green = automatically added left balance species and caps, '
         'purple = automatically added right balance species, red = unresolved.</p>'

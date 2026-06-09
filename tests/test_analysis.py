@@ -15,7 +15,7 @@ from strain_homodesmotic_reaction_generator.core import (  # noqa: E402
     export_analysis,
     format_counter,
 )
-from strain_homodesmotic_reaction_generator import PLUGIN_DEPENDENCIES
+from strain_homodesmotic_reaction_generator import PLUGIN_DEPENDENCIES, PLUGIN_VERSION
 
 
 
@@ -107,7 +107,7 @@ def test_export_analysis_writes_colored_html(tmp_path):
 
     text = output.read_text(encoding="utf-8")
     assert "<!doctype html>" in text
-    assert "v0.3.1" in text
+    assert f"v{PLUGIN_VERSION}" in text
     assert "row-ref" in text
     assert "<td>Ref</td>" in text
     assert "<td>primary carbon - ether oxygen - primary carbon</td>" in text

@@ -9,7 +9,7 @@ from typing import Any
 from .ui import open_analyzer_dialog
 
 PLUGIN_NAME = "Strain Homodesmotic Reaction Generator"
-PLUGIN_VERSION = "0.3.1"
+PLUGIN_VERSION = "0.3.2"
 PLUGIN_AUTHOR = "HiroYokoyama"
 PLUGIN_DEPENDENCIES = ("numpy", "scipy")
 PLUGIN_DESCRIPTION = (
