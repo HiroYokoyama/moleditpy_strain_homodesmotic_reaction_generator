@@ -112,15 +112,15 @@ def test_export_analysis_writes_colored_html(tmp_path):
     assert "<td>Ref</td>" in text
     assert "<td>primary carbon - ether oxygen - primary carbon</td>" in text
 
-    # Benzene (has left balance)
-    result_benzene = analyze_molecule(Chem.MolFromSmiles("c1ccccc1"))
-    output_benzene = tmp_path / "analysis_benzene.html"
-    export_analysis(output_benzene, result_benzene)
-    text_benzene = output_benzene.read_text(encoding="utf-8")
-    assert "<td>Ref</td>" in text_benzene
-    assert "<td>Aromatic-CH</td>" in text_benzene
-    assert "<td>Left Balance</td>" in text_benzene
-    assert "<td>Benzene</td>" in text_benzene
+    # Biphenyl (has left balance)
+    result_biphenyl = analyze_molecule(Chem.MolFromSmiles("c1ccccc1-c2ccccc2"))
+    output_biphenyl = tmp_path / "analysis_biphenyl.html"
+    export_analysis(output_biphenyl, result_biphenyl)
+    text_biphenyl = output_biphenyl.read_text(encoding="utf-8")
+    assert "<td>Ref</td>" in text_biphenyl
+    assert "<td>Aromatic-CH</td>" in text_biphenyl
+    assert "<td>Left Balance</td>" in text_biphenyl
+    assert "<td>ethane</td>" in text_biphenyl
 
 
 def test_analyze_adamantanone_detects_carbonyls():
@@ -182,7 +182,7 @@ def test_analyze_benzene_aromatic():
     assert result.matches[0].name == "Aromatic-CH"
     assert result.matches[0].count == 6
     assert not result.is_elemental_balance
-    assert "c1ccccc1 + 5 c1ccccc1 (Benzene) -> 6 c1ccccc1" in result.equation_text
+    assert "c1ccccc1 -> 1 c1ccccc1" in result.equation_text
 
 
 def test_analyze_toluene_aromatic():
@@ -192,7 +192,7 @@ def test_analyze_toluene_aromatic():
     assert "Aromatic-CH" in names
     assert "Aromatic-C-Carbon" in names
     assert not result.is_elemental_balance
-    assert "Cc1ccccc1 + 5 c1ccccc1 (Benzene) -> 5 c1ccccc1 + 1 Cc1ccccc1" in result.equation_text
+    assert "cc1ccccc1 -> 1 cc1ccccc1" in result.equation_text.lower()
 
 
 def test_analyze_naphthalene_aromatic():
@@ -211,7 +211,7 @@ def test_analyze_biphenyl_aromatic():
     assert "Aromatic-CH" in names
     assert "Aromatic-C-Carbon" in names
     assert not result.is_elemental_balance
-    assert "c1ccc(-c2ccccc2)cc1 + 1 cc (ethane) + 10 c1ccccc1 (benzene) -> 10 c1ccccc1 + 2 cc1ccccc1" in result.equation_text.lower()
+    assert "c1ccc(-c2ccccc2)cc1 + 1 cc (ethane) -> 2 cc1ccccc1" in result.equation_text.lower()
 
 
 def test_analyze_five_cpp_aromatic():
@@ -219,15 +219,15 @@ def test_analyze_five_cpp_aromatic():
     result = analyze_molecule(mol)
     assert not result.is_elemental_balance
     assert format_counter(result.target_atoms) == "C: 30, H: 20"
-    assert format_counter(result.reference_atoms) == "C: 190, H: 200"
-    assert format_counter(result.atom_delta) == "C: 160, H: 180"
+    assert format_counter(result.reference_atoms) == "C: 70, H: 80"
+    assert format_counter(result.atom_delta) == "C: 40, H: 60"
     
     names_counts = {match.name: match.count for match in result.matches}
     assert names_counts["Aromatic-CH"] == 20
     assert names_counts["Aromatic-C-Carbon"] == 10
     
     left_names = {term.name: term.count for term in result.left_balance_terms}
-    assert left_names["Benzene"] == 25
+    assert left_names["Benzene"] == 5
     assert left_names["ethane"] == 5
     
     right_active = [term for term in result.right_balance_terms if term.count > 0]

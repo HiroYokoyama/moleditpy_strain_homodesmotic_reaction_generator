@@ -451,6 +451,84 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         left_balance_terms, unresolved_left_atoms = build_balance_terms(left_needed)
         right_balance_terms, unresolved_right_atoms = build_balance_terms(right_needed)
 
+    # Algebraic cancellation of identical reference molecules on both sides
+    lhs_counts = Counter()
+    for term in left_balance_terms:
+        if term.count > 0:
+            lhs_counts[term.smiles] += term.count
+
+    rhs_counts = Counter()
+    for term in rhs_terms:
+        if term.count > 0:
+            rhs_counts[term.smiles] += term.count
+    for term in right_balance_terms:
+        if term.count > 0:
+            rhs_counts[term.smiles] += term.count
+
+    cancellations = Counter()
+    for smiles, l_count in lhs_counts.items():
+        r_count = rhs_counts.get(smiles, 0)
+        if r_count > 0:
+            cancellations[smiles] = min(l_count, r_count)
+
+    new_left_balance_terms = []
+    for term in left_balance_terms:
+        cancel_qty = cancellations.get(term.smiles, 0)
+        new_count = max(0, term.count - cancel_qty)
+        new_left_balance_terms.append(
+            BalanceTerm(name=term.name, smiles=term.smiles, count=new_count)
+        )
+
+    new_right_balance_terms = []
+    rhs_cancel_remaining = Counter(cancellations)
+    for term in right_balance_terms:
+        cancel_qty = rhs_cancel_remaining.get(term.smiles, 0)
+        if cancel_qty > 0:
+            sub = min(term.count, cancel_qty)
+            new_count = term.count - sub
+            rhs_cancel_remaining[term.smiles] -= sub
+        else:
+            new_count = term.count
+        new_right_balance_terms.append(
+            BalanceTerm(name=term.name, smiles=term.smiles, count=new_count)
+        )
+
+    new_rhs_terms = []
+    for term in rhs_terms:
+        cancel_qty = rhs_cancel_remaining.get(term.smiles, 0)
+        if cancel_qty > 0:
+            sub = min(term.count, cancel_qty)
+            new_count = term.count - sub
+            rhs_cancel_remaining[term.smiles] -= sub
+        else:
+            new_count = term.count
+        new_rhs_terms.append(
+            ReferenceTerm(
+                count=new_count,
+                smiles=term.smiles,
+                original_atom_indices=term.original_atom_indices,
+            )
+        )
+
+    left_balance_terms = tuple(new_left_balance_terms)
+    right_balance_terms = tuple(new_right_balance_terms)
+    rhs_terms = tuple(new_rhs_terms)
+
+    # Recalculate reference_atoms and atom_delta based on cancelled terms
+    reference_atoms = Counter()
+    for term in rhs_terms:
+        if term.count > 0:
+            ref_mol = Chem.MolFromSmiles(term.smiles)
+            if ref_mol is not None:
+                for element, number in atom_counts(explicit_hydrogen_copy(ref_mol)).items():
+                    reference_atoms[element] += number * term.count
+
+    atom_delta = Counter()
+    for element in sorted(set(target_atoms) | set(reference_atoms)):
+        delta = reference_atoms[element] - target_atoms[element]
+        if delta != 0:
+            atom_delta[element] = delta
+
     equation_text = build_equation_text(
         target_smiles,
         target_atoms,
@@ -742,7 +820,10 @@ def build_equation_text(
         "-----\n"
         "This tool detects predefined local environments and proposes reference "
         "molecules. Simple balancing species are added automatically when the "
-        "atom-count difference can be represented by the built-in molecule library."
+        "atom-count difference can be represented by the built-in molecule library.\n\n"
+        "Common balancing species and reference molecules appearing on both sides "
+        "of the equation have been algebraically cancelled to prevent redundant "
+        "reference calculations in downstream quantum chemistry pipelines."
     )
 
 
@@ -932,6 +1013,9 @@ def build_equation_html(
         '<p style="color:#9aa0a6;">Blue = original target and reference cores, '
         'green = automatically added left balance species and caps, '
         'purple = automatically added right balance species, red = unresolved.</p>'
+        '<p style="color:#9aa0a6; font-size:12px; margin-top:8px;">'
+        'Note: Common balancing species and reference molecules appearing on both sides '
+        'of the equation have been algebraically cancelled to prevent redundant reference calculations.</p>'
         '</div>'
     )
 
