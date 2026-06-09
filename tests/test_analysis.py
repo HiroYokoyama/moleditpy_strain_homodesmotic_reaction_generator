@@ -90,9 +90,12 @@ def test_export_analysis_writes_csv(tmp_path):
     result = analyze_molecule(Chem.MolFromSmiles("CC"))
     output = tmp_path / "analysis.csv"
 
-    export_analysis(output, result)
+    export_analysis(output, result, current_file_path="my_test_molecule.pmeprj")
 
     text = output.read_text(encoding="utf-8")
+    assert "Homodesmotic Reaction Report" in text
+    assert "File,my_test_molecule.pmeprj" in text
+    assert "Generated on," in text
     assert "Environment,Count,Reference SMILES,Description" in text
     assert "primary carbon - primary carbon,1,CC" in text
     assert "Left-side balancing species" in text
@@ -103,10 +106,12 @@ def test_export_analysis_writes_colored_html(tmp_path):
     result = analyze_molecule(Chem.MolFromSmiles("COC"))
     output = tmp_path / "analysis.html"
 
-    export_analysis(output, result)
+    export_analysis(output, result, current_file_path="my_test_ether.pmeprj")
 
     text = output.read_text(encoding="utf-8")
     assert "<!doctype html>" in text
+    assert "File: my_test_ether.pmeprj" in text
+    assert "Generated on:" in text
     assert f"v{PLUGIN_VERSION}" in text
     assert "row-ref" in text
     assert "<td>Ref</td>" in text
@@ -121,6 +126,19 @@ def test_export_analysis_writes_colored_html(tmp_path):
     assert "<td>Aromatic-CH</td>" in text_biphenyl
     assert "<td>Left Balance</td>" in text_biphenyl
     assert "<td>ethane</td>" in text_biphenyl
+
+
+def test_export_analysis_writes_txt(tmp_path):
+    result = analyze_molecule(Chem.MolFromSmiles("CC"))
+    output = tmp_path / "analysis.txt"
+
+    export_analysis(output, result, current_file_path="my_test_ethane.pmeprj")
+
+    text = output.read_text(encoding="utf-8")
+    assert "Homodesmotic Reaction Report" in text
+    assert "File: my_test_ethane.pmeprj" in text
+    assert "Generated on:" in text
+    assert "CC -> 1 CC" in text
 
 
 def test_analyze_adamantanone_detects_carbonyls():

@@ -255,7 +255,9 @@ if QDialog is not None:
                 return
 
             try:
-                export_analysis(path, self.last_result)
+                main_window = self.context.get_main_window() if hasattr(self.context, "get_main_window") else None
+                current_file_path = getattr(main_window.init_manager, "current_file_path", None) if hasattr(main_window, "init_manager") else None
+                export_analysis(path, self.last_result, current_file_path)
             except OSError as exc:
                 QMessageBox.critical(self, "Export Failed", str(exc))
                 _status(self.context, f"Export failed: {exc}", 5000)
