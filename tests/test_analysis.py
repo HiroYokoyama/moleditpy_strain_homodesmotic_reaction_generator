@@ -126,6 +126,7 @@ def test_export_analysis_writes_colored_html(tmp_path):
     assert "<td>Aromatic-CH</td>" in text_biphenyl
     assert "<td>Left Balance</td>" in text_biphenyl
     assert "<td>ethane</td>" in text_biphenyl
+    assert "<td>Two-carbon saturated hydrocarbon balance species.</td>" in text_biphenyl
 
 
 def test_export_analysis_writes_txt(tmp_path):
@@ -304,17 +305,15 @@ def test_analyze_cyclopropane_balance_species_colored():
     assert "C1CC1 + 3 CCC (propane) -> 3 CCCC" in result.equation_text
     
     # Check that propane (CCC) is colored atom-by-atom in HTML
-    # The middle carbon should be blue (#8ab4f8), outer carbons should be green (#81c995)
+    # The middle carbon should be yellow (#fde293), outer carbons should be green (#81c995)
     assert "color:#81c995" in result.equation_html
-    assert "color:#8ab4f8" in result.equation_html
+    assert "color:#fde293" in result.equation_html
     
     # Verify that the term "3 CCC" is constructed with mixed colors
-    # Atom 1 (middle) has core_color (#8ab4f8), Atom 0 & 2 have added_color (#81c995)
-    # The SMILES string is "CCC", so the first C is green, second C is blue, third C is green
+    # Atom 1 (middle) has core_color (#fde293), Atom 0 & 2 have added_color (#81c995)
+    # The SMILES string is "CCC", so the first C is green, second C is yellow, third C is green
     import re
-    c_green = r'color:#81c995;[^>]*>C'
-    c_blue = r'color:#8ab4f8;[^>]*>C'
-    pattern = c_green + r'.*?' + c_blue + r'.*?' + c_green
+    pattern = r'3\s+<span\s+style="color:#81c995;[^>]*>C</span><span\s+style="color:#fde293;[^>]*>C</span><span\s+style="color:#81c995;[^>]*>C</span>'
     assert re.search(pattern, result.equation_html) is not None
 
 

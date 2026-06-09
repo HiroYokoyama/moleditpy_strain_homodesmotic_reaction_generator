@@ -248,6 +248,7 @@ class BalanceTerm:
     name: str
     smiles: str
     count: int
+    description: str = ""
 
 
 @dataclass(frozen=True)
@@ -476,7 +477,7 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         cancel_qty = cancellations.get(term.smiles, 0)
         new_count = max(0, term.count - cancel_qty)
         new_left_balance_terms.append(
-            BalanceTerm(name=term.name, smiles=term.smiles, count=new_count)
+            BalanceTerm(name=term.name, smiles=term.smiles, count=new_count, description=term.description)
         )
 
     new_right_balance_terms = []
@@ -490,7 +491,7 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         else:
             new_count = term.count
         new_right_balance_terms.append(
-            BalanceTerm(name=term.name, smiles=term.smiles, count=new_count)
+            BalanceTerm(name=term.name, smiles=term.smiles, count=new_count, description=term.description)
         )
 
     new_rhs_terms = []
@@ -719,13 +720,13 @@ def build_hyperhomodesmotic_balance_terms(
     for j, count in enumerate(u):
         if count > 0:
             species = species_list[j][0]
-            left_terms.append(BalanceTerm(species.name, species.smiles, int(count)))
+            left_terms.append(BalanceTerm(species.name, species.smiles, int(count), description=species.description))
             
     right_terms = []
     for j, count in enumerate(v):
         if count > 0:
             species = species_list[j][0]
-            right_terms.append(BalanceTerm(species.name, species.smiles, int(count)))
+            right_terms.append(BalanceTerm(species.name, species.smiles, int(count), description=species.description))
             
     return tuple(left_terms), tuple(right_terms), True
 
@@ -759,7 +760,7 @@ def build_balance_terms(
 
     grouped = Counter(candidate_tuple[index][0] for index in solution)
     terms = tuple(
-        BalanceTerm(species.name, species.smiles, count)
+        BalanceTerm(species.name, species.smiles, count, description=species.description)
         for species, count in sorted(grouped.items(), key=lambda item: item[0].name)
     )
     return terms, Counter()
@@ -1012,12 +1013,13 @@ def build_equation_html(
 ) -> str:
     target_color = "#8ab4f8"
     reference_color = "#8ab4f8"
+    balance_core_color = "#fde293"
     left_added_color = "#81c995"
     right_added_color = "#c58af9"
     unresolved_color = "#f28b82"
 
-    left_balance = _html_terms(left_balance_terms, target_color, left_added_color)
-    right_balance = _html_terms(right_balance_terms, target_color, right_added_color)
+    left_balance = _html_terms(left_balance_terms, balance_core_color, left_added_color)
+    right_balance = _html_terms(right_balance_terms, balance_core_color, right_added_color)
     unresolved_left = _html_counter(unresolved_left_atoms, unresolved_color, "Unresolved left-side atom")
     unresolved_right = _html_counter(unresolved_right_atoms, unresolved_color, "Unresolved right-side atom")
 
@@ -1065,6 +1067,7 @@ def build_equation_html(
         f'<p><span style="color:#9aa0a6;">Unresolved left-side atoms:</span> {unresolved_left}</p>'
         f'<p><span style="color:#9aa0a6;">Unresolved right-side atoms:</span> {unresolved_right}</p>'
         '<p style="color:#9aa0a6;">Blue = original target and reference cores, '
+        'yellow = balancing cores to adjust over-counted bonds, '
         'green = automatically added left balance species and caps, '
         'purple = automatically added right balance species, red = unresolved.</p>'
         '<p style="color:#9aa0a6; font-size:12px; margin-top:8px;">'
@@ -1228,14 +1231,13 @@ def export_analysis(
                 "</tr>"
                 for match in result.matches
             )
-            + "\n"
             + "\n".join(
                 "                    <tr class=\"row-left\">"
                 "<td>Left Balance</td>"
                 f"<td>{html.escape(term.name)}</td>"
                 f"<td>{term.count}</td>"
                 f"<td class=\"smiles-mono\">{html.escape(term.smiles)}</td>"
-                "<td>Added left-side balance species</td>"
+                f"<td>{html.escape(term.description or 'Added left-side balance species')}</td>"
                 "</tr>"
                 for term in result.left_balance_terms
                 if term.count > 0
@@ -1247,7 +1249,7 @@ def export_analysis(
                 f"<td>{html.escape(term.name)}</td>"
                 f"<td>{term.count}</td>"
                 f"<td class=\"smiles-mono\">{html.escape(term.smiles)}</td>"
-                "<td>Added right-side balance species</td>"
+                f"<td>{html.escape(term.description or 'Added right-side balance species')}</td>"
                 "</tr>"
                 for term in result.right_balance_terms
                 if term.count > 0

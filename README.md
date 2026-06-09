@@ -32,7 +32,9 @@ Copy or symlink the `strain_homodesmotic_reaction_generator` folder into your Mo
 HTML export preserves the dialog color coding:
 
 - **Blue**: original target and reference cores.
-- **Green**: automatically added balancing species and caps.
+- **Yellow**: balancing cores to adjust over-counted bonds.
+- **Green**: automatically added left balance species and caps.
+- **Purple**: automatically added right balance species.
 - **Red**: unresolved species that still need manual chemistry review.
 
 The generated equation is a draft. The atom-balance summary shows which atoms were balanced automatically and which atoms still need additional balancing species before using quantum-chemical energies.
