@@ -316,6 +316,11 @@ def test_analyze_cyclopropane_balance_species_colored():
     pattern = r'3\s+<span\s+style="color:#81c995;[^>]*>C</span><span\s+style="color:#fde293;[^>]*>C</span><span\s+style="color:#81c995;[^>]*>C</span>'
     assert re.search(pattern, result.equation_html) is not None
 
+    # Verify that the term "3 CCCC" on the right side is colored:
+    # C1 (green), C2 (yellow), C3 (blue), C4 (green)
+    pattern_butane = r'3\s+<span\s+style="color:#81c995;[^>]*>C</span><span\s+style="color:#fde293;[^>]*>C</span><span\s+style="color:#8ab4f8;[^>]*>C</span><span\s+style="color:#81c995;[^>]*>C</span>'
+    assert re.search(pattern_butane, result.equation_html) is not None
+
 
 
 
