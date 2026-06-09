@@ -182,8 +182,9 @@ if QDialog is not None:
             
             self.table.setRowCount(len(matches) + len(left) + len(right))
             
-            ref_brush = QBrush(QColor("#1967d2"))
-            balance_brush = QBrush(QColor("#b06000"))
+            ref_brush = QBrush(QColor("#1a73e8"))
+            left_brush = QBrush(QColor("#1b7a2d"))
+            right_brush = QBrush(QColor("#a142f4"))
             
             row = 0
             for match in matches:
@@ -192,12 +193,12 @@ if QDialog is not None:
                 row += 1
                 
             for term in left:
-                self._set_colored_row(row, f"Left Balance: {term.name}", str(term.count), term.smiles, balance_brush)
+                self._set_colored_row(row, f"Left Balance: {term.name}", str(term.count), term.smiles, left_brush)
                 self._add_load_button(row, term.smiles, "Added left-side balance species")
                 row += 1
                 
             for term in right:
-                self._set_colored_row(row, f"Right Balance: {term.name}", str(term.count), term.smiles, balance_brush)
+                self._set_colored_row(row, f"Right Balance: {term.name}", str(term.count), term.smiles, right_brush)
                 self._add_load_button(row, term.smiles, "Added right-side balance species")
                 row += 1
 

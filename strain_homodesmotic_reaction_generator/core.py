@@ -870,7 +870,7 @@ def build_equation_html(
 ) -> str:
     target_color = "#8ab4f8"
     reference_color = "#8ab4f8"
-    left_added_color = "#fdd663"
+    left_added_color = "#81c995"
     right_added_color = "#c58af9"
     unresolved_color = "#f28b82"
 
@@ -909,9 +909,9 @@ def build_equation_html(
         '<h3 style="margin:0 0 8px 0; color:#e8eaed;">Homodesmotic Draft Equation</h3>'
         f'{warning_html}'
         f'<p><span style="color:#9aa0a6;">Target atom count:</span> '
-        f'{_html_counter(target_atoms, target_color, "Original target atom")}</p>'
+        f'{_html_counter(target_atoms, "#e8eaed", "Target atom")}</p>'
         f'<p><span style="color:#9aa0a6;">Reference-side atom count:</span> '
-        f'{_html_counter(reference_atoms, reference_color, "Detected reference atom")}</p>'
+        f'{_html_counter(reference_atoms, "#e8eaed", "Reference atom")}</p>'
         f'<p><span style="color:#9aa0a6;">Reference minus target atom delta:</span> '
         f'{_html_counter(atom_delta, "#e8eaed", "Atom-count difference")}</p>'
         f'<p><span style="color:#9aa0a6;">Left-side balancing species:</span> {left_balance}</p>'
@@ -922,7 +922,7 @@ def build_equation_html(
         f'<p style="font-size:14px;">{" + ".join(lhs_parts)} '
         f'<span style="color:#e8eaed;">-&gt;</span> {" + ".join(rhs_parts)}</p>'
         '<p style="color:#9aa0a6;">Blue = original target and reference cores, '
-        'yellow = automatically added left balance species and caps, '
+        'green = automatically added left balance species and caps, '
         'purple = automatically added right balance species, red = unresolved.</p>'
         '</div>'
     )
@@ -946,12 +946,34 @@ def export_analysis(path: str | Path, result: AnalysisResult) -> None:
             "<th>Reference SMILES</th><th>Description</th></tr></thead><tbody>\n"
             + "\n".join(
                 "<tr>"
-                f"<td>{html.escape(match.name)}</td>"
+                f"<td>Ref: {html.escape(match.name)}</td>"
                 f"<td>{match.count}</td>"
                 f"<td>{html.escape(match.reference_smiles)}</td>"
                 f"<td>{html.escape(match.description)}</td>"
                 "</tr>"
                 for match in result.matches
+            )
+            + "\n"
+            + "\n".join(
+                "<tr>"
+                f"<td>Left Balance: {html.escape(term.name)}</td>"
+                f"<td>{term.count}</td>"
+                f"<td>{html.escape(term.smiles)}</td>"
+                "<td>Added left-side balance species</td>"
+                "</tr>"
+                for term in result.left_balance_terms
+                if term.count > 0
+            )
+            + "\n"
+            + "\n".join(
+                "<tr>"
+                f"<td>Right Balance: {html.escape(term.name)}</td>"
+                f"<td>{term.count}</td>"
+                f"<td>{html.escape(term.smiles)}</td>"
+                "<td>Added right-side balance species</td>"
+                "</tr>"
+                for term in result.right_balance_terms
+                if term.count > 0
             )
             + "\n</tbody></table>\n"
             "</body></html>\n",

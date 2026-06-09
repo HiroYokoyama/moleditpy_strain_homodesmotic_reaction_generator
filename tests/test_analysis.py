@@ -99,6 +99,7 @@ def test_export_analysis_writes_csv(tmp_path):
 
 
 def test_export_analysis_writes_colored_html(tmp_path):
+    # Dimethyl ether (no balance)
     result = analyze_molecule(Chem.MolFromSmiles("COC"))
     output = tmp_path / "analysis.html"
 
@@ -107,7 +108,15 @@ def test_export_analysis_writes_colored_html(tmp_path):
     text = output.read_text(encoding="utf-8")
     assert "<!doctype html>" in text
     assert "#8ab4f8" in text
-    assert "primary carbon - ether oxygen - primary carbon" in text
+    assert "Ref: primary carbon - ether oxygen - primary carbon" in text
+
+    # Benzene (has left balance)
+    result_benzene = analyze_molecule(Chem.MolFromSmiles("c1ccccc1"))
+    output_benzene = tmp_path / "analysis_benzene.html"
+    export_analysis(output_benzene, result_benzene)
+    text_benzene = output_benzene.read_text(encoding="utf-8")
+    assert "Ref: Aromatic-CH" in text_benzene
+    assert "Left Balance: Benzene" in text_benzene
 
 
 def test_analyze_adamantanone_detects_carbonyls():
