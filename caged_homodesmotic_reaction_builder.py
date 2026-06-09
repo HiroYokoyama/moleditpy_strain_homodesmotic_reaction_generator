@@ -191,7 +191,6 @@ BALANCE_SPECIES: tuple[BalanceSpecies, ...] = (
     BalanceSpecies("ethane", "CC", "Two-carbon saturated hydrocarbon balance species."),
     BalanceSpecies("propane", "CCC", "Three-carbon saturated hydrocarbon balance species."),
     BalanceSpecies("butane", "CCCC", "Four-carbon saturated hydrocarbon balance species."),
-    BalanceSpecies("hydrogen", "[H][H]", "Hydrogen balance species."),
     BalanceSpecies("dimethyl ether", "COC", "Ether-only oxygen balance species."),
     BalanceSpecies("ethyl methyl ether", "CCOC", "Ether-only oxygen balance species."),
     BalanceSpecies("diethyl ether", "CCOCC", "Ether-only oxygen balance species."),
