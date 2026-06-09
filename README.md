@@ -1,10 +1,10 @@
-# Caged Molecule Homodesmotic Reaction Builder
+# Strain Homodesmotic Reaction Generator
 
 This folder contains a MoleditPy plugin that detects common local bonding
-environments in caged or highly constrained molecules and proposes small
+environments in strained or highly constrained molecules and proposes small
 reference molecules for draft homodesmotic or isodesmic reaction balancing.
 
-Version: `0.1.1`
+Version: `0.2.0`
 
 ## Features
 
@@ -15,18 +15,18 @@ Version: `0.1.1`
 
 ## Files
 
-- `caged_homodesmotic_reaction_builder.py` - plugin entry point.
+- `strain_homodesmotic_reaction_generator.py` - plugin entry point.
 - `tests/test_analysis.py` - lightweight tests for the analysis/export logic.
 - `.github/workflows/ci.yml` - GitHub Actions CI workflow configuration.
 
 ## Install
 
-Copy or symlink `caged_homodesmotic_reaction_builder.py` into your MoleditPy user plugins directory (e.g. `~/.moleditpy/plugins/`). The plugin registers itself in the Analysis menu as **Caged Molecule Homodesmotic Reaction Builder**.
+Copy or symlink `strain_homodesmotic_reaction_generator.py` into your MoleditPy user plugins directory (e.g. `~/.moleditpy/plugins/`). The plugin registers itself in the Analysis menu as **Strain Homodesmotic Reaction Generator**.
 
 ## Usage
 
 1. Open or draw a molecule in MoleditPy.
-2. Choose **Analysis > Caged Molecule Homodesmotic Reaction Builder**.
+2. Choose **Analysis > Strain Homodesmotic Reaction Generator**.
 3. Click **Analyze Current Molecule**.
 4. Review the detected environments, automatically generated balancing species, and any unresolved atom-balance entries.
 5. Export the analysis as CSV, HTML, or text if needed.

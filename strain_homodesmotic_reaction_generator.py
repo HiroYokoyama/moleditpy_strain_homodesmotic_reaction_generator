@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Caged Molecule Homodesmotic Reaction Builder plugin for MoleditPy.
+Strain Homodesmotic Reaction Generator plugin for MoleditPy.
 
 The plugin detects common local bonding environments in the current molecule and
 builds a draft reference-molecule balance for homodesmotic or isodesmic
@@ -63,16 +63,16 @@ except ImportError:  # pragma: no cover - exercised only in non-GUI test hosts
     QVBoxLayout = None  # type: ignore[assignment]
 
 
-PLUGIN_NAME = "Caged Molecule Homodesmotic Reaction Builder"
-PLUGIN_VERSION = "0.1.1"
+PLUGIN_NAME = "Strain Homodesmotic Reaction Generator"
+PLUGIN_VERSION = "0.2.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 PLUGIN_DEPENDENCIES = ("numpy", "scipy")
 PLUGIN_DESCRIPTION = (
-    "Detect cage-molecule bonding environments and build a draft homodesmotic "
+    "Detect strain-molecule bonding environments and build a draft homodesmotic "
     "reaction balance."
 )
 
-WINDOW_ID = "caged_homodesmotic_reaction_builder"
+WINDOW_ID = "strain_homodesmotic_reaction_generator"
 
 
 @dataclass(frozen=True)
@@ -760,7 +760,7 @@ def color_smiles_atoms_by_index(
     indexed_colors: dict[int, tuple[str, str]],
     default_color: str,
     default_title: str,
-) -> str:
+ ) -> str:
     """Color atom tokens inside a SMILES string using atom-token indexes."""
     organic_two_letter_atoms = {"Cl", "Br"}
     organic_one_letter_atoms = set("BCNOPSFIbcnops")
@@ -816,7 +816,7 @@ def color_reference_term(
     added_color: str,
 ) -> str:
     indexed_colors = {
-        index: (original_color, "Original cage-environment atom in reference fragment")
+        index: (original_color, "Original strain-environment atom in reference fragment")
         for index in term.original_atom_indices
     }
     smiles = color_smiles_atoms_by_index(
@@ -972,7 +972,7 @@ if QDialog is not None:
                 False,
             )
 
-            self.setWindowTitle("Caged Molecule Homodesmotic Reaction Builder")
+            self.setWindowTitle("Strain Homodesmotic Reaction Generator")
             self.resize(820, 640)
 
             layout = QVBoxLayout(self)
@@ -1101,7 +1101,7 @@ if QDialog is not None:
             path, _ = QFileDialog.getSaveFileName(
                 self,
                 "Export Homodesmotic Reaction Draft",
-                "caged_homodesmotic_reaction_draft.csv",
+                "strain_homodesmotic_reaction_draft.csv",
                 "CSV Files (*.csv);;HTML Files (*.html);;Text Files (*.txt)",
             )
             if not path:
@@ -1124,7 +1124,7 @@ def export_analysis(path: str | Path, result: AnalysisResult) -> None:
         output_path.write_text(
             "<!doctype html>\n"
             "<html><head><meta charset=\"utf-8\">"
-            "<title>Caged Molecule Homodesmotic Reaction Builder</title>"
+            "<title>Strain Homodesmotic Reaction Generator</title>"
             "<style>body{background:#202124;color:#e8eaed;margin:24px;}"
             "table{border-collapse:collapse;margin-top:20px;}"
             "th,td{border:1px solid #3c4043;padding:6px 10px;}"

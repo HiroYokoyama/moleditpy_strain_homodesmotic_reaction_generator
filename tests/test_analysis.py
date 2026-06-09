@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from caged_homodesmotic_reaction_builder import (  # noqa: E402
+from strain_homodesmotic_reaction_generator import (  # noqa: E402
     Chem,
     analyze_molecule,
     build_balance_terms,
@@ -153,10 +153,10 @@ def test_plugin_metadata():
 
 
 def test_analyze_fallback_triggered_when_milp_is_missing(monkeypatch):
-    import caged_homodesmotic_reaction_builder
-    monkeypatch.setattr(caged_homodesmotic_reaction_builder, "milp", None)
+    import strain_homodesmotic_reaction_generator
+    monkeypatch.setattr(strain_homodesmotic_reaction_generator, "milp", None)
     mol = Chem.MolFromSmiles("COC")
-    result = caged_homodesmotic_reaction_builder.analyze_molecule(mol)
+    result = strain_homodesmotic_reaction_generator.analyze_molecule(mol)
     assert result.is_elemental_balance
     assert "Calculated in elemental balance mode" in result.equation_html
 
