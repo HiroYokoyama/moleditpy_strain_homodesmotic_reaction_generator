@@ -64,7 +64,7 @@ except ImportError:  # pragma: no cover - exercised only in non-GUI test hosts
 
 
 PLUGIN_NAME = "Caged Molecule Homodesmotic Reaction Builder"
-PLUGIN_VERSION = "0.1.0"
+PLUGIN_VERSION = "0.1.1"
 PLUGIN_AUTHOR = "HiroYokoyama"
 PLUGIN_DEPENDENCIES = ("numpy", "scipy")
 PLUGIN_DESCRIPTION = (
@@ -969,6 +969,7 @@ if QDialog is not None:
                 (),
                 "",
                 "",
+                False,
             )
 
             self.setWindowTitle("Caged Molecule Homodesmotic Reaction Builder")
