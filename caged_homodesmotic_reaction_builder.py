@@ -66,6 +66,7 @@ except ImportError:  # pragma: no cover - exercised only in non-GUI test hosts
 PLUGIN_NAME = "Caged Molecule Homodesmotic Reaction Builder"
 PLUGIN_VERSION = "0.1.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
+PLUGIN_DEPENDENCIES = ("numpy", "scipy")
 PLUGIN_DESCRIPTION = (
     "Detect cage-molecule bonding environments and build a draft homodesmotic "
     "reaction balance."
@@ -275,6 +276,7 @@ class AnalysisResult:
     matches: tuple[EnvironmentMatch, ...]
     equation_text: str
     equation_html: str
+    is_elemental_balance: bool
 
 
 def _require_rdkit() -> None:
@@ -467,6 +469,7 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         tuple(matches),
         equation_text,
         equation_html,
+        not milp_success,
     )
 
 
@@ -972,6 +975,13 @@ if QDialog is not None:
             intro.setWordWrap(True)
             layout.addWidget(intro)
 
+            self.warning_label = QLabel(
+                "⚠️ SciPy not detected or exact MILP balance impossible; operating in elemental balance mode."
+            )
+            self.warning_label.setStyleSheet("color: #f28b82; font-weight: bold;")
+            self.warning_label.setVisible(False)
+            layout.addWidget(self.warning_label)
+
             self.table = QTableWidget(0, 4)
             self.table.setHorizontalHeaderLabels(
                 ["Environment", "Count", "Reference SMILES", "Action"]
@@ -1015,6 +1025,7 @@ if QDialog is not None:
             self.last_result = analyze_molecule(mol)
             self._populate_table(self.last_result)
             self.equation_box.setHtml(self.last_result.equation_html)
+            self.warning_label.setVisible(self.last_result.is_elemental_balance)
 
             if mol is None or mol.GetNumAtoms() == 0:
                 _status(self.context, "No molecule is loaded.", 3000)
