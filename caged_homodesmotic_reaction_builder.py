@@ -25,6 +25,14 @@ except ImportError:  # pragma: no cover - exercised only in hosts without RDKit
     Chem = None  # type: ignore[assignment]
 
 try:
+    import numpy as np
+    from scipy.optimize import LinearConstraint, milp
+except ImportError:
+    np = None
+    LinearConstraint = None
+    milp = None
+
+try:
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import (
         QDialog,
@@ -191,9 +199,13 @@ BALANCE_SPECIES: tuple[BalanceSpecies, ...] = (
     BalanceSpecies("ethane", "CC", "Two-carbon saturated hydrocarbon balance species."),
     BalanceSpecies("propane", "CCC", "Three-carbon saturated hydrocarbon balance species."),
     BalanceSpecies("butane", "CCCC", "Four-carbon saturated hydrocarbon balance species."),
-    BalanceSpecies("dimethyl ether", "COC", "Ether-only oxygen balance species."),
-    BalanceSpecies("ethyl methyl ether", "CCOC", "Ether-only oxygen balance species."),
-    BalanceSpecies("diethyl ether", "CCOCC", "Ether-only oxygen balance species."),
+    BalanceSpecies("Dimethyl ether", "COC", "Simplest ether"),
+    BalanceSpecies("Ethyl methyl ether", "CCOC", "Asymmetric aliphatic ether"),
+    BalanceSpecies("Diethyl ether", "CCOCC", "Common symmetric ether"),
+    BalanceSpecies("Isobutane", "CC(C)C", "Branched alkane"),
+    BalanceSpecies("Neopentane", "CC(C)(C)C", "Highly branched alkane"),
+    BalanceSpecies("Isopropyl methyl ether", "COC(C)C", "Branched ether"),
+    BalanceSpecies("tert-Butyl methyl ether", "COC(C)(C)C", "Highly branched ether"),
 )
 
 
@@ -250,6 +262,39 @@ def atom_counts(mol: Any) -> Counter[str]:
     return counts
 
 
+def count_groups(mol: Any) -> Counter[str]:
+    """Return local environment group counts for an RDKit molecule to ensure hyperhomodesmotic balance."""
+    counts: Counter[str] = Counter()
+    if mol is None:
+        return counts
+    mol = Chem.AddHs(mol)
+    for atom in mol.GetAtoms():
+        atomic_num = atom.GetAtomicNum()
+        if atomic_num == 1:
+            continue
+        if atomic_num == 8:
+            counts["O(C)(C)"] += 1
+        elif atomic_num == 6:
+            h_count = 0
+            o_count = 0
+            for n in atom.GetNeighbors():
+                if n.GetAtomicNum() == 1:
+                    h_count += 1
+                elif n.GetAtomicNum() == 8:
+                    o_count += 1
+            if h_count == 4:
+                counts["CH4"] += 1
+            elif h_count == 3:
+                counts["CH3(O)" if o_count else "CH3(C)"] += 1
+            elif h_count == 2:
+                counts["CH2(C)(O)" if o_count else "CH2(C)(C)"] += 1
+            elif h_count == 1:
+                counts["CH(C)(C)(O)" if o_count else "CH(C)(C)(C)"] += 1
+            elif h_count == 0:
+                counts["C(C)(C)(C)(O)" if o_count else "C(C)(C)(C)(C)"] += 1
+    return counts
+
+
 def explicit_hydrogen_copy(mol: Any) -> Any:
     """Return a copy with explicit hydrogens without mutating the host molecule."""
     _require_rdkit()
@@ -285,7 +330,9 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
 
     target_smiles = Chem.MolToSmiles(Chem.RemoveHs(mol), isomericSmiles=True)
     target_atoms = atom_counts(explicit_hydrogen_copy(mol))
+    target_groups = count_groups(mol)
     reference_atoms: Counter[str] = Counter()
+    reference_groups: Counter[str] = Counter()
     matches: list[EnvironmentMatch] = []
     rhs_terms: list[ReferenceTerm] = []
 
@@ -316,6 +363,8 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
             continue
         for element, number in atom_counts(explicit_hydrogen_copy(ref_mol)).items():
             reference_atoms[element] += number * count
+        for group, number in count_groups(ref_mol).items():
+            reference_groups[group] += number * count
 
     atom_delta: Counter[str] = Counter()
     for element in sorted(set(target_atoms) | set(reference_atoms)):
@@ -323,14 +372,28 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         if delta != 0:
             atom_delta[element] = delta
 
-    left_needed = Counter(
-        {element: count for element, count in atom_delta.items() if count > 0}
-    )
-    right_needed = Counter(
-        {element: -count for element, count in atom_delta.items() if count < 0}
-    )
-    left_balance_terms, unresolved_left_atoms = build_balance_terms(left_needed)
-    right_balance_terms, unresolved_right_atoms = build_balance_terms(right_needed)
+    group_delta: Counter[str] = Counter()
+    for group in sorted(set(target_groups) | set(reference_groups)):
+        delta = reference_groups[group] - target_groups[group]
+        if delta != 0:
+            group_delta[group] = delta
+
+    left_balance_terms, right_balance_terms = (), ()
+    unresolved_left_atoms, unresolved_right_atoms = Counter(), Counter()
+    milp_success = False
+
+    if milp is not None and np is not None:
+        left_balance_terms, right_balance_terms, milp_success = build_hyperhomodesmotic_balance_terms(group_delta)
+
+    if not milp_success:
+        left_needed = Counter(
+            {element: count for element, count in atom_delta.items() if count > 0}
+        )
+        right_needed = Counter(
+            {element: -count for element, count in atom_delta.items() if count < 0}
+        )
+        left_balance_terms, unresolved_left_atoms = build_balance_terms(left_needed)
+        right_balance_terms, unresolved_right_atoms = build_balance_terms(right_needed)
 
     equation_text = build_equation_text(
         target_smiles,
@@ -411,15 +474,19 @@ def _counter_key(values: Counter[str]) -> tuple[tuple[str, int], ...]:
 def _solution_score(
     indexes: tuple[int, ...],
     candidates: tuple[tuple[BalanceSpecies, Counter[str]], ...],
-) -> tuple[int, int, str]:
+) -> tuple[int, int, int, str]:
     heavy_atoms = sum(
         count
         for index in indexes
         for element, count in candidates[index][1].items()
         if element != "H"
     )
+    min_heavy = min(
+        sum(count for element, count in candidates[index][1].items() if element != "H")
+        for index in indexes
+    ) if indexes else 0
     names = ",".join(candidates[index][0].name for index in indexes)
-    return (len(indexes), -heavy_atoms, names)
+    return (len(indexes), -heavy_atoms, -min_heavy, names)
 
 
 def _search_balance(
@@ -457,6 +524,72 @@ def _search_balance(
         return best
 
     return search(_counter_key(needed_atoms), 0)
+
+
+def build_hyperhomodesmotic_balance_terms(
+    group_delta: Counter[str],
+) -> tuple[tuple[BalanceTerm, ...], tuple[BalanceTerm, ...], bool]:
+    """Solve for a perfectly balanced hyperhomodesmotic reaction using MILP."""
+    if not group_delta:
+        return (), (), True
+        
+    species_list = []
+    for species in BALANCE_SPECIES:
+        mol = Chem.MolFromSmiles(species.smiles)
+        if mol is not None:
+            species_list.append((species, count_groups(mol)))
+            
+    if not species_list:
+        return (), (), False
+
+    group_names = sorted(list(set(k for _, c in species_list for k in c.keys()) | set(group_delta.keys())))
+    n_groups = len(group_names)
+    n_species = len(species_list)
+
+    A = np.zeros((n_groups, n_species))
+    for j, (_, c) in enumerate(species_list):
+        for i, name in enumerate(group_names):
+            A[i, j] = c[name]
+
+    A_eq = np.hstack((A, -A))
+    b_eq = np.array([group_delta.get(name, 0) for name in group_names])
+
+    c = np.ones(2 * n_species)
+    for j, (species, _) in enumerate(species_list):
+        heavy = sum(1 for char in species.smiles if char.isalpha() and char != 'H')
+        cost = 1.0
+        if heavy == 1:
+            cost = 1.02
+        elif heavy == 2:
+            cost = 1.01
+        c[j] = cost
+        c[n_species + j] = cost
+
+    integrality = np.ones(2 * n_species)
+
+    try:
+        res = milp(c=c, constraints=LinearConstraint(A_eq, b_eq, b_eq), integrality=integrality)
+        if not res.success:
+            return (), (), False
+    except Exception:
+        return (), (), False
+
+    u = np.round(res.x[:n_species]).astype(int)
+    v = np.round(res.x[n_species:]).astype(int)
+    
+    left_terms = []
+    for j, count in enumerate(u):
+        if count > 0:
+            species = species_list[j][0]
+            left_terms.append(BalanceTerm(species.name, species.smiles, int(count)))
+            
+    right_terms = []
+    for j, count in enumerate(v):
+        if count > 0:
+            species = species_list[j][0]
+            right_terms.append(BalanceTerm(species.name, species.smiles, int(count)))
+            
+    return tuple(left_terms), tuple(right_terms), True
 
 
 def build_balance_terms(
@@ -683,13 +816,13 @@ def build_equation_html(
     unresolved_right_atoms: Counter[str],
 ) -> str:
     target_color = "#8ab4f8"
-    reference_color = "#81c995"
+    reference_color = "#8ab4f8"
     left_added_color = "#fdd663"
     right_added_color = "#c58af9"
     unresolved_color = "#f28b82"
 
     left_balance = _html_terms(left_balance_terms, left_added_color, "Added left-side balance species")
-    right_balance = _html_terms(right_balance_terms, right_added_color, "Added right-side balance species")
+    right_balance = _html_terms(right_balance_terms, left_added_color, "Added right-side balance species")
     unresolved_left = _html_counter(unresolved_left_atoms, unresolved_color, "Unresolved left-side atom")
     unresolved_right = _html_counter(unresolved_right_atoms, unresolved_color, "Unresolved right-side atom")
 
