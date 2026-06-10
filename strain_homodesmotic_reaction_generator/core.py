@@ -1022,8 +1022,6 @@ def color_reference_term(
     term: ReferenceTerm,
     original_color: str,
     added_color: str,
-    yellow_color: str = "#fde293",
-    yellow_count: int = 0,
 ) -> str:
     cores = _BALANCE_CORE_MAP.get(term.smiles, None)
     if cores is not None:
@@ -1036,18 +1034,9 @@ def color_reference_term(
         # No map entry: fall back to all SMARTS-matched atoms as environment atoms.
         true_core_atoms = sorted(term.original_atom_indices)
 
-    num_cores = len(true_core_atoms)
-    if term.count > 0:
-        yellow_per_mol = min(num_cores, int(round(yellow_count / term.count)))
-    else:
-        yellow_per_mol = 0
-
     indexed_colors = {}
-    for idx, atom_idx in enumerate(true_core_atoms):
-        if idx < yellow_per_mol:
-            indexed_colors[atom_idx] = (yellow_color, "Balance species core environment atom")
-        else:
-            indexed_colors[atom_idx] = (original_color, "Original strain-environment atom in reference fragment")
+    for atom_idx in true_core_atoms:
+        indexed_colors[atom_idx] = (original_color, "Original strain-environment atom in reference fragment")
 
     smiles = color_smiles_atoms_by_index(
         term.smiles,
@@ -1144,32 +1133,6 @@ def build_equation_html(
     unresolved_left = _html_counter(unresolved_left_atoms, unresolved_color, "Unresolved left-side atom")
     unresolved_right = _html_counter(unresolved_right_atoms, unresolved_color, "Unresolved right-side atom")
 
-    total_left_balance_cores = sum(
-        t.count * len(_BALANCE_CORE_MAP.get(t.smiles, ()))
-        for t in left_balance_terms
-    )
-    total_right_balance_cores = sum(
-        t.count * len(_BALANCE_CORE_MAP.get(t.smiles, ()))
-        for t in right_balance_terms
-    )
-    yellow_remaining = max(0, total_left_balance_cores - total_right_balance_cores)
-
-    reference_yellow_counts = {}
-    for term in rhs_terms:
-        if term.count > 0:
-            term_cores_map = _BALANCE_CORE_MAP.get(term.smiles, None)
-            if term_cores_map is not None:
-                # Use the full core map (consistent with color_reference_term)
-                num_cores = len(term_cores_map)
-            else:
-                num_cores = len(term.original_atom_indices)
-            total_cores = term.count * num_cores
-            allocated = min(yellow_remaining, total_cores)
-            reference_yellow_counts[term] = allocated
-            yellow_remaining -= allocated
-        else:
-            reference_yellow_counts[term] = 0
-
     target_label = target_smiles or "Target"
     lhs_parts = [
         color_smiles_atoms(target_label, target_color, "Original target atom")
@@ -1185,8 +1148,6 @@ def build_equation_html(
                 term,
                 reference_color,
                 left_added_color,
-                yellow_color=balance_core_color,
-                yellow_count=reference_yellow_counts.get(term, 0),
             )
             for term in rhs_terms
             if term.count > 0

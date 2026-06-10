@@ -317,8 +317,8 @@ def test_analyze_cyclopropane_balance_species_colored():
     assert re.search(pattern, result.equation_html) is not None
 
     # Verify that the term "3 CCCC" on the right side is colored:
-    # C1 (green), C2 (yellow), C3 (blue), C4 (green)
-    pattern_butane = r'3\s+<span\s+style="color:#81c995;[^>]*>C</span><span\s+style="color:#fde293;[^>]*>C</span><span\s+style="color:#8ab4f8;[^>]*>C</span><span\s+style="color:#81c995;[^>]*>C</span>'
+    # C1 (green), C2 (blue), C3 (blue), C4 (green)
+    pattern_butane = r'3\s+<span\s+style="color:#81c995;[^>]*>C</span><span\s+style="color:#8ab4f8;[^>]*>C</span><span\s+style="color:#8ab4f8;[^>]*>C</span><span\s+style="color:#81c995;[^>]*>C</span>'
     assert re.search(pattern_butane, result.equation_html) is not None
 
 
@@ -428,8 +428,7 @@ def test_analyze_five_cpp_coloring():
 
     import re
     # Biphenyl on RHS: 5 c1ccc(-c2ccccc2)cc1
-    # Ring 1 (c1ccc...cc1) should be blue (#8ab4f8)
-    # Ring 2 (c2ccccc2) should be yellow (#fde293)
+    # Both rings should be colored blue (#8ab4f8)
     pattern = (
         r'5\s+'
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>1'
@@ -437,12 +436,12 @@ def test_analyze_five_cpp_coloring():
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
         r'\(-'
-        r'<span\s+style="color:#fde293;[^>]*>c</span>2'
-        r'<span\s+style="color:#fde293;[^>]*>c</span>'
-        r'<span\s+style="color:#fde293;[^>]*>c</span>'
-        r'<span\s+style="color:#fde293;[^>]*>c</span>'
-        r'<span\s+style="color:#fde293;[^>]*>c</span>'
-        r'<span\s+style="color:#fde293;[^>]*>c</span>2'
+        r'<span\s+style="color:#8ab4f8;[^>]*>c</span>2'
+        r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
+        r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
+        r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
+        r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
+        r'<span\s+style="color:#8ab4f8;[^>]*>c</span>2'
         r'\)'
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>1'
