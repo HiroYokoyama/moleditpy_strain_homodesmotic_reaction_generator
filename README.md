@@ -27,7 +27,7 @@ Copy or symlink the `strain_homodesmotic_reaction_generator` folder into your Mo
 2. Choose **Analysis > Strain Homodesmotic Reaction Generator**.
 3. Click **Analyze Current Molecule**.
 4. Review the detected environments, automatically generated balancing species, and any unresolved atom-balance entries.
-5. Export the analysis as CSV, HTML, or text if needed.
+5. Export the analysis as CSV, HTML, or text if needed. Sample report is available [here](./sample/strain_homodesmotic_reaction_draft_sample.html).
 
 HTML export preserves the dialog color coding:
 
