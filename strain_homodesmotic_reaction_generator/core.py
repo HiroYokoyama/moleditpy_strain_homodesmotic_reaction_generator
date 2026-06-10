@@ -73,6 +73,8 @@ class AnalysisResult:
     target_bonds: Counter[str]
     reaction_bonds_delta: Counter[str]
     reaction_type: str
+    lhs_bonds: Counter[str]
+    rhs_bonds: Counter[str]
 
 
 def _require_rdkit() -> None:
@@ -385,6 +387,8 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
             Counter(),
             Counter(),
             "Unbalanced",
+            Counter(),
+            Counter(),
         )
 
     target_smiles = Chem.MolToSmiles(Chem.RemoveHs(mol), isomericSmiles=True)
@@ -585,6 +589,8 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         target_bonds,
         reaction_bonds_delta,
         reaction_type,
+        lhs_bonds,
+        rhs_bonds,
     )
     equation_html = build_equation_html(
         target_smiles,
@@ -600,6 +606,8 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         target_bonds,
         reaction_bonds_delta,
         reaction_type,
+        lhs_bonds,
+        rhs_bonds,
     )
     return AnalysisResult(
         target_smiles,
@@ -617,6 +625,8 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         target_bonds,
         reaction_bonds_delta,
         reaction_type,
+        lhs_bonds,
+        rhs_bonds,
     )
 
 
@@ -836,7 +846,13 @@ def build_equation_text(
     target_bonds: Counter[str],
     reaction_bonds_delta: Counter[str],
     reaction_type: str,
+    lhs_bonds: Counter[str] = None,
+    rhs_bonds: Counter[str] = None,
 ) -> str:
+    if lhs_bonds is None:
+        lhs_bonds = Counter()
+    if rhs_bonds is None:
+        rhs_bonds = Counter()
     left_balance = format_terms(left_balance_terms)
     right_balance = format_terms(right_balance_terms)
     unresolved_left = format_counter(unresolved_left_atoms)
@@ -865,6 +881,8 @@ def build_equation_text(
         f"Reference-side atom count: {format_counter(reference_atoms)}\n"
         f"Reference minus target atom delta: {format_counter(atom_delta)}\n\n"
         f"Target bond counts: {format_counter(target_bonds)}\n"
+        f"Left-side bond counts: {format_counter(lhs_bonds)}\n"
+        f"Right-side bond counts: {format_counter(rhs_bonds)}\n"
         f"Reaction bond difference: {format_counter(reaction_bonds_delta)}\n\n"
         f"Left-side balancing species: {left_balance}\n"
         f"Right-side balancing species: {right_balance}\n"
@@ -1057,6 +1075,8 @@ def build_equation_html(
     target_bonds: Counter[str] = None,
     reaction_bonds_delta: Counter[str] = None,
     reaction_type: str = "Unbalanced",
+    lhs_bonds: Counter[str] = None,
+    rhs_bonds: Counter[str] = None,
 ) -> str:
     target_color = "#8ab4f8"
     reference_color = "#8ab4f8"
@@ -1069,6 +1089,10 @@ def build_equation_html(
         target_bonds = Counter()
     if reaction_bonds_delta is None:
         reaction_bonds_delta = Counter()
+    if lhs_bonds is None:
+        lhs_bonds = Counter()
+    if rhs_bonds is None:
+        rhs_bonds = Counter()
 
     left_balance = _html_terms(left_balance_terms, balance_core_color, left_added_color)
     right_balance = _html_terms(right_balance_terms, balance_core_color, right_added_color)
@@ -1145,6 +1169,10 @@ def build_equation_html(
         f'{_html_counter(atom_delta, "#e8eaed", "Atom-count difference")}</p>'
         f'<p><span style="color:#9aa0a6;">Target bond counts:</span> '
         f'{_html_counter(target_bonds, "#e8eaed", "Target bond")}</p>'
+        f'<p><span style="color:#9aa0a6;">Left-side bond counts:</span> '
+        f'{_html_counter(lhs_bonds, "#e8eaed", "Left-side bond")}</p>'
+        f'<p><span style="color:#9aa0a6;">Right-side bond counts:</span> '
+        f'{_html_counter(rhs_bonds, "#e8eaed", "Right-side bond")}</p>'
         f'<p><span style="color:#9aa0a6;">Reaction bond difference:</span> '
         f'{_html_counter(reaction_bonds_delta, "#e8eaed", "Reaction bond difference")}</p>'
         f'<p><span style="color:#9aa0a6;">Left-side balancing species:</span> {left_balance}</p>'
@@ -1376,6 +1404,8 @@ def export_analysis(
         writer.writerow(["Reference-side atom count", format_counter(result.reference_atoms)])
         writer.writerow(["Reference minus target atom delta", format_counter(result.atom_delta)])
         writer.writerow(["Target bond counts", format_counter(result.target_bonds)])
+        writer.writerow(["Left-side bond counts", format_counter(result.lhs_bonds)])
+        writer.writerow(["Right-side bond counts", format_counter(result.rhs_bonds)])
         writer.writerow(["Reaction bond difference", format_counter(result.reaction_bonds_delta)])
         writer.writerow(["Left-side balancing species", format_terms(result.left_balance_terms)])
         writer.writerow(["Right-side balancing species", format_terms(result.right_balance_terms)])

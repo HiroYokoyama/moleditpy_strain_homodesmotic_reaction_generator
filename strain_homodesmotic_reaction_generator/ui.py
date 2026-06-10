@@ -137,6 +137,8 @@ if QDialog is not None:
                 Counter(),
                 Counter(),
                 "Unbalanced",
+                Counter(),
+                Counter(),
             )
 
             from . import PLUGIN_VERSION
@@ -216,6 +218,8 @@ if QDialog is not None:
                     Counter(),
                     Counter(),
                     "Unbalanced",
+                    Counter(),
+                    Counter(),
                 )
                 self._populate_table(self.last_result)
                 self.equation_box.setHtml(self.last_result.equation_html)
