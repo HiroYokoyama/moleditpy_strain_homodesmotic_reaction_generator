@@ -899,7 +899,7 @@ def build_equation_text(
     for btype in sorted(set(lhs_bonds) | set(rhs_bonds)):
         l_c = lhs_bonds[btype]
         r_c = rhs_bonds[btype]
-        status = "Satisfied" if l_c == r_c else f"Not satisfied (LHS: {l_c}, RHS: {r_c})"
+        status = f"Satisfied (LHS: {l_c}, RHS: {r_c})" if l_c == r_c else f"Not satisfied (LHS: {l_c}, RHS: {r_c}, Delta: {r_c - l_c:+})"
         bond_status_lines.append(f"  - {btype}: {status}")
     bond_status_text = "\n".join(bond_status_lines) if bond_status_lines else "  - No bonds detected"
 
@@ -1192,9 +1192,9 @@ def build_equation_html(
         l_c = lhs_bonds[btype]
         r_c = rhs_bonds[btype]
         if l_c == r_c:
-            status_html = '<span style="color:#81c995; font-weight:bold;">Satisfied</span>'
+            status_html = f'<span style="color:#81c995; font-weight:bold;">Satisfied</span> (LHS: {l_c}, RHS: {r_c})'
         else:
-            status_html = f'<span style="color:#f28b82; font-weight:bold;">Not satisfied</span> (LHS: {l_c}, RHS: {r_c})'
+            status_html = f'<span style="color:#f28b82; font-weight:bold;">Not satisfied</span> (LHS: {l_c}, RHS: {r_c}, Delta: {r_c - l_c:+})'
         bond_status_htmls.append(f'<li><span style="color:#e8eaed;">{btype}</span>: {status_html}</li>')
     
     if bond_status_htmls:
@@ -1456,12 +1456,13 @@ def export_analysis(
         writer.writerow(["Hyperhomodesmotic condition", "Satisfied" if result.reaction_type == "Hyperhomodesmotic" else "Not satisfied"])
         writer.writerow([])
         writer.writerow(["Bond-type conservation status"])
-        writer.writerow(["Bond Type", "LHS Count", "RHS Count", "Status"])
+        writer.writerow(["Bond Type", "LHS Count", "RHS Count", "Delta", "Status"])
         for btype in sorted(set(result.lhs_bonds) | set(result.rhs_bonds)):
             l_c = result.lhs_bonds[btype]
             r_c = result.rhs_bonds[btype]
+            delta = r_c - l_c
             status = "Satisfied" if l_c == r_c else "Not satisfied"
-            writer.writerow([btype, l_c, r_c, status])
+            writer.writerow([btype, l_c, r_c, f"{delta:+}" if delta != 0 else "0", status])
         writer.writerow([])
         writer.writerow(["Target atom count", format_counter(result.target_atoms)])
         writer.writerow(["Reference-side atom count", format_counter(result.reference_atoms)])
