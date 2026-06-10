@@ -4,7 +4,7 @@ This folder contains a MoleditPy plugin that detects common local bonding
 environments in strained or highly constrained molecules and proposes small
 reference molecules for draft homodesmotic or isodesmic reaction balancing.
 
-Repo: [https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/]()
+Repo: [https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/](https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/)
 
 ## Features
 
