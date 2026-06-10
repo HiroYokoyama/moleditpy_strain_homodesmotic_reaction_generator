@@ -517,9 +517,30 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
             )
         )
 
+    new_matches = []
+    rhs_cancel_remaining_matches = Counter(cancellations)
+    for match in matches:
+        cancel_qty = rhs_cancel_remaining_matches.get(match.reference_smiles, 0)
+        if cancel_qty > 0:
+            sub = min(match.count, cancel_qty)
+            new_count = match.count - sub
+            rhs_cancel_remaining_matches[match.reference_smiles] -= sub
+        else:
+            new_count = match.count
+        new_matches.append(
+            EnvironmentMatch(
+                name=match.name,
+                count=new_count,
+                reference_smiles=match.reference_smiles,
+                description=match.description,
+                original_atom_indices=match.original_atom_indices,
+            )
+        )
+
     left_balance_terms = tuple(new_left_balance_terms)
     right_balance_terms = tuple(new_right_balance_terms)
     rhs_terms = tuple(new_rhs_terms)
+    matches = tuple(new_matches)
 
     # Recalculate reference_atoms and atom_delta based on cancelled terms
     reference_atoms = Counter()
@@ -1343,6 +1364,7 @@ def export_analysis(
                 f"<td>{html.escape(match.description)}</td>"
                 "</tr>"
                 for match in result.matches
+                if match.count > 0
             )
             + "\n".join(
                 "                    <tr class=\"row-left\">"
@@ -1395,9 +1417,10 @@ def export_analysis(
         writer.writerow([])
         writer.writerow(["Environment", "Count", "Reference SMILES", "Description"])
         for match in result.matches:
-            writer.writerow(
-                [match.name, match.count, match.reference_smiles, match.description]
-            )
+            if match.count > 0:
+                writer.writerow(
+                    [match.name, match.count, match.reference_smiles, match.description]
+                )
         writer.writerow([])
         writer.writerow(["Reaction Type", result.reaction_type])
         writer.writerow(["Target atom count", format_counter(result.target_atoms)])

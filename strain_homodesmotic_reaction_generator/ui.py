@@ -268,9 +268,9 @@ if QDialog is not None:
             _status(self.context, "Analysis failed.", 5000)
 
         def _populate_table(self, result: AnalysisResult) -> None:
-            matches = result.matches
-            left = result.left_balance_terms
-            right = result.right_balance_terms
+            matches = [m for m in result.matches if m.count > 0]
+            left = [t for t in result.left_balance_terms if t.count > 0]
+            right = [t for t in result.right_balance_terms if t.count > 0]
             
             self.table.setRowCount(len(matches) + len(left) + len(right))
             
