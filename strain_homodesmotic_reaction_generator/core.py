@@ -1023,6 +1023,11 @@ def color_reference_term(
     original_color: str,
     added_color: str,
 ) -> str:
+    """Color atom tokens of a reference fragment.
+
+    True core atoms are colored with original_color (blue), while any capping
+    atoms are colored with added_color (green).
+    """
     cores = _BALANCE_CORE_MAP.get(term.smiles, None)
     if cores is not None:
         # Use the full balance-core-map definition as the true core atoms.
@@ -1112,6 +1117,15 @@ def build_equation_html(
     lhs_bonds: Counter[str] = None,
     rhs_bonds: Counter[str] = None,
 ) -> str:
+    """Build a styled HTML representation of the homodesmotic equation.
+
+    Uses specific color-coding logic:
+      - Blue: Target core atoms and reference core atoms
+      - Yellow: Core atoms of the balancing species (adjusting over-counted bonds)
+      - Green: Capping atoms on LHS and LHS balance species
+      - Purple: RHS balance species
+      - Red: Unresolved species/atoms
+    """
     target_color = "#8ab4f8"
     reference_color = "#8ab4f8"
     balance_core_color = "#fde293"
