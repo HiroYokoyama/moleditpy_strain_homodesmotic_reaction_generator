@@ -4,6 +4,8 @@ This folder contains a MoleditPy plugin that detects common local bonding
 environments in strained or highly constrained molecules and proposes small
 reference molecules for draft homodesmotic or isodesmic reaction balancing.
 
+Repo: [https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/]()
+
 ## Features
 
 - **Expanded Support**: Auto-detects and balances ketones, aldehydes, amines (primary, secondary, tertiary), and extended alkanes.
@@ -19,7 +21,7 @@ reference molecules for draft homodesmotic or isodesmic reaction balancing.
 
 ## Install
 
-Copy or symlink the `strain_homodesmotic_reaction_generator` folder into your MoleditPy user plugins directory (e.g. `~/.moleditpy/plugins/`). The plugin registers itself in the Analysis menu as **Strain Homodesmotic Reaction Generator**.
+Download from MoleditPy [Plugin Explorer](https://hiroyokoyama.github.io/moleditpy-plugins/explorer/?q=Strain+Homodesmotic+Reaction+Generato). Copy `strain_homodesmotic_reaction_generator` folder into your MoleditPy user plugins directory (e.g. `~/.moleditpy/plugins/`). The plugin registers itself in the Analysis menu as **Strain Homodesmotic Reaction Generator**.
 
 ## Usage
 
