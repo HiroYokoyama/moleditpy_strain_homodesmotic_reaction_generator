@@ -421,4 +421,34 @@ def test_hyperhomodesmotic_condition_reporting():
     assert "Hyperhomodesmotic condition:</span> <span style=\"color:#f28b82; font-weight:bold;\">Not satisfied</span>" in result_hmta.equation_html
 
 
+def test_analyze_five_cpp_coloring():
+    mol = Chem.MolFromSmiles("c1cc2ccc1-c1ccc(cc1)-c1ccc(cc1)-c1ccc(cc1)-c1ccc-2cc1")
+    result = analyze_molecule(mol)
+    assert not result.is_elemental_balance
+
+    import re
+    # Biphenyl on RHS: 5 c1ccc(-c2ccccc2)cc1
+    # Ring 1 (c1ccc...cc1) should be blue (#8ab4f8)
+    # Ring 2 (c2ccccc2) should be yellow (#fde293)
+    pattern = (
+        r'5\s+'
+        r'<span\s+style="color:#8ab4f8;[^>]*>c</span>1'
+        r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
+        r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
+        r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
+        r'\(-'
+        r'<span\s+style="color:#fde293;[^>]*>c</span>2'
+        r'<span\s+style="color:#fde293;[^>]*>c</span>'
+        r'<span\s+style="color:#fde293;[^>]*>c</span>'
+        r'<span\s+style="color:#fde293;[^>]*>c</span>'
+        r'<span\s+style="color:#fde293;[^>]*>c</span>'
+        r'<span\s+style="color:#fde293;[^>]*>c</span>2'
+        r'\)'
+        r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
+        r'<span\s+style="color:#8ab4f8;[^>]*>c</span>1'
+    )
+    assert re.search(pattern, result.equation_html) is not None
+
+
+
 

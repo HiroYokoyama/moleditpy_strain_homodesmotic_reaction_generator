@@ -1031,7 +1031,7 @@ def color_reference_term(
         # original_atom_indices only captures the SMARTS-matched atoms, which for
         # atom-centric aromatic rules is just 1 atom — not the whole ring environment.
         # _BALANCE_CORE_MAP is the authoritative source of which atoms are core.
-        true_core_atoms = sorted(cores)
+        true_core_atoms = list(cores)
     else:
         # No map entry: fall back to all SMARTS-matched atoms as environment atoms.
         true_core_atoms = sorted(term.original_atom_indices)
