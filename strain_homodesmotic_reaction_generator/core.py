@@ -213,7 +213,8 @@ def bond_counts_helper(mol: Any) -> Counter[str]:
             if sym == "H":
                 return "H"
             hyb = str(atom.GetHybridization()).lower()
-            return f"{sym}({hyb})"
+            h_count = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 1)
+            return f"{sym}({hyb},H{h_count})"
 
         a1_label = format_atom(ba)
         a2_label = format_atom(ea)

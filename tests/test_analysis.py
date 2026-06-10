@@ -326,8 +326,8 @@ def test_bond_type_analysis():
     # Ethane should have 1 C(sp3)-C(sp3) single bond and 6 C(sp3)-H single bonds
     mol = Chem.MolFromSmiles("CC")
     result = analyze_molecule(mol)
-    assert result.target_bonds["C(sp3)-C(sp3) (single)"] == 1
-    assert result.target_bonds["C(sp3)-H (single)"] == 6
+    assert result.target_bonds["C(sp3,H3)-C(sp3,H3) (single)"] == 1
+    assert result.target_bonds["C(sp3,H3)-H (single)"] == 6
     # Perfectly balanced, so reaction bond delta should be empty (none)
     assert format_counter(result.reaction_bonds_delta) == "none"
 
@@ -411,8 +411,8 @@ def test_hyperhomodesmotic_condition_reporting():
     result_ethane = analyze_molecule(mol_ethane)
     assert "Hyperhomodesmotic condition: Satisfied" in result_ethane.equation_text
     assert "Hyperhomodesmotic condition:</span> <span style=\"color:#81c995; font-weight:bold;\">Satisfied</span>" in result_ethane.equation_html
-    assert "C(sp3)-C(sp3) (single): Satisfied" in result_ethane.equation_text
-    assert "C(sp3)-H (single): Satisfied" in result_ethane.equation_text
+    assert "C(sp3,H3)-C(sp3,H3) (single): Satisfied" in result_ethane.equation_text
+    assert "C(sp3,H3)-H (single): Satisfied" in result_ethane.equation_text
 
     # Hexamethylenetetramine (HMTA) - falls back to elemental balance (Not satisfied)
     mol_hmta = Chem.MolFromSmiles("C1N2CN3CN1CN(C2)C3")
