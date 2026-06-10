@@ -323,11 +323,11 @@ def test_analyze_cyclopropane_balance_species_colored():
 
 
 def test_bond_type_analysis():
-    # Ethane should have 1 C-C single bond and 6 C-H single bonds
+    # Ethane should have 1 C(sp3)-C(sp3) single bond and 6 C(sp3)-H single bonds
     mol = Chem.MolFromSmiles("CC")
     result = analyze_molecule(mol)
-    assert result.target_bonds["C-C (single)"] == 1
-    assert result.target_bonds["C-H (single)"] == 6
+    assert result.target_bonds["C(sp3)-C(sp3) (single)"] == 1
+    assert result.target_bonds["C(sp3)-H (single)"] == 6
     # Perfectly balanced, so reaction bond delta should be empty (none)
     assert format_counter(result.reaction_bonds_delta) == "none"
 

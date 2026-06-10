@@ -173,8 +173,8 @@ def bond_counts(mol: Any) -> Counter[str]:
     return bond_counts_helper(mol_with_hs)
 
 
-def bond_counts_helper(mol: Any) -> Counter[str]:
-    """Return bond type counts for a molecule that already has explicit hydrogens."""
+def simple_bond_counts_helper(mol: Any) -> Counter[str]:
+    """Return simple element-pair bond type counts (without hybridization)."""
     counts: Counter[str] = Counter()
     if mol is None:
         return counts
@@ -182,6 +182,41 @@ def bond_counts_helper(mol: Any) -> Counter[str]:
         a1 = bond.GetBeginAtom().GetSymbol()
         a2 = bond.GetEndAtom().GetSymbol()
         pair = sorted([a1, a2])
+        btype = bond.GetBondType()
+        if btype == Chem.BondType.SINGLE:
+            suffix = " (single)"
+        elif btype == Chem.BondType.DOUBLE:
+            suffix = " (double)"
+        elif btype == Chem.BondType.TRIPLE:
+            suffix = " (triple)"
+        elif btype == Chem.BondType.AROMATIC:
+            suffix = " (aromatic)"
+        else:
+            suffix = f" ({str(btype).lower()})"
+        counts[f"{pair[0]}-{pair[1]}{suffix}"] += 1
+    return counts
+
+
+def bond_counts_helper(mol: Any) -> Counter[str]:
+    """Return bond type counts with atom hybridization for a molecule that already has explicit hydrogens."""
+    counts: Counter[str] = Counter()
+    if mol is None:
+        return counts
+    for bond in mol.GetBonds():
+        ba = bond.GetBeginAtom()
+        ea = bond.GetEndAtom()
+
+        def format_atom(atom: Any) -> str:
+            sym = atom.GetSymbol()
+            if sym == "H":
+                return "H"
+            hyb = str(atom.GetHybridization()).lower()
+            return f"{sym}({hyb})"
+
+        a1_label = format_atom(ba)
+        a2_label = format_atom(ea)
+        pair = sorted([a1_label, a2_label])
+
         btype = bond.GetBondType()
         if btype == Chem.BondType.SINGLE:
             suffix = " (single)"
@@ -296,12 +331,12 @@ def classify_reaction_type(
     # 4. Isodesmic check (LHS simple bonds == RHS simple bonds)
     lhs_simple_bonds: Counter[str] = Counter()
     for mol, count in lhs_mols:
-        for btype, b_count in bond_counts_helper(mol).items():
+        for btype, b_count in simple_bond_counts_helper(mol).items():
             lhs_simple_bonds[btype] += b_count * count
 
     rhs_simple_bonds: Counter[str] = Counter()
     for mol, count in rhs_mols:
-        for btype, b_count in bond_counts_helper(mol).items():
+        for btype, b_count in simple_bond_counts_helper(mol).items():
             rhs_simple_bonds[btype] += b_count * count
 
     if lhs_simple_bonds == rhs_simple_bonds:
