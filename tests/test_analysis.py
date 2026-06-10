@@ -308,7 +308,7 @@ def test_analyze_cyclopropane_balance_species_colored():
     # The middle carbon should be yellow (#fde293), outer carbons should be green (#81c995)
     assert "color:#81c995" in result.equation_html
     assert "color:#fde293" in result.equation_html
-    
+
     # Verify that the term "3 CCC" is constructed with mixed colors
     # Atom 1 (middle) has core_color (#fde293), Atom 0 & 2 have added_color (#81c995)
     # The SMILES string is "CCC", so the first C is green, second C is yellow, third C is green

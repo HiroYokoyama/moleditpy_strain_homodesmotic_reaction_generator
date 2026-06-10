@@ -157,7 +157,7 @@ if QDialog is not None:
             self.warning_label = QLabel(
                 "⚠️ SciPy not detected or exact MILP balance impossible; operating in elemental balance mode."
             )
-            self.warning_label.setStyleSheet("color: #f28b82; font-weight: bold;")
+            self.warning_label.setStyleSheet("color: #fde293; font-weight: bold;")
             self.warning_label.setVisible(False)
             layout.addWidget(self.warning_label)
 

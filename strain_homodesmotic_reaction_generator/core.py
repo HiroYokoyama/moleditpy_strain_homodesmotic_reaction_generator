@@ -1025,14 +1025,25 @@ def color_reference_term(
     yellow_color: str = "#fde293",
     yellow_count: int = 0,
 ) -> str:
-    num_cores = len(term.original_atom_indices)
+    cores = _BALANCE_CORE_MAP.get(term.smiles, None)
+    if cores is not None:
+        # Use the full balance-core-map definition as the true core atoms.
+        # original_atom_indices only captures the SMARTS-matched atoms, which for
+        # atom-centric aromatic rules is just 1 atom — not the whole ring environment.
+        # _BALANCE_CORE_MAP is the authoritative source of which atoms are core.
+        true_core_atoms = sorted(cores)
+    else:
+        # No map entry: fall back to all SMARTS-matched atoms as environment atoms.
+        true_core_atoms = sorted(term.original_atom_indices)
+
+    num_cores = len(true_core_atoms)
     if term.count > 0:
         yellow_per_mol = min(num_cores, int(round(yellow_count / term.count)))
     else:
         yellow_per_mol = 0
 
     indexed_colors = {}
-    for idx, atom_idx in enumerate(term.original_atom_indices):
+    for idx, atom_idx in enumerate(true_core_atoms):
         if idx < yellow_per_mol:
             indexed_colors[atom_idx] = (yellow_color, "Balance species core environment atom")
         else:
@@ -1146,7 +1157,12 @@ def build_equation_html(
     reference_yellow_counts = {}
     for term in rhs_terms:
         if term.count > 0:
-            num_cores = len(term.original_atom_indices)
+            term_cores_map = _BALANCE_CORE_MAP.get(term.smiles, None)
+            if term_cores_map is not None:
+                # Use the full core map (consistent with color_reference_term)
+                num_cores = len(term_cores_map)
+            else:
+                num_cores = len(term.original_atom_indices)
             total_cores = term.count * num_cores
             allocated = min(yellow_remaining, total_cores)
             reference_yellow_counts[term] = allocated
@@ -1184,7 +1200,7 @@ def build_equation_html(
 
     warning_html = ""
     if is_elemental_balance:
-        warning_html = '<p style="color:#f28b82; font-weight:bold;">⚠️ Note: Calculated in elemental balance mode due to environment matching constraints.</p>'
+        warning_html = '<p style="color:#fde293; font-weight:bold;">⚠️ Note: Calculated in elemental balance mode due to environment matching constraints.</p>'
 
     is_hyper = (reaction_type == "Hyperhomodesmotic")
     hyper_status_html = '<span style="color:#81c995; font-weight:bold;">Satisfied</span>' if is_hyper else '<span style="color:#f28b82; font-weight:bold;">Not satisfied</span>'
