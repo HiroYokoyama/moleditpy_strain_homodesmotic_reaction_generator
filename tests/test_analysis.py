@@ -405,3 +405,20 @@ def test_reaction_type_classification_levels():
     ) == "Elemental Balance"
 
 
+def test_hyperhomodesmotic_condition_reporting():
+    # Ethane: Hyperhomodesmotic (Satisfied)
+    mol_ethane = Chem.MolFromSmiles("CC")
+    result_ethane = analyze_molecule(mol_ethane)
+    assert "Hyperhomodesmotic condition: Satisfied" in result_ethane.equation_text
+    assert "Hyperhomodesmotic condition:</span> <span style=\"color:#81c995; font-weight:bold;\">Satisfied</span>" in result_ethane.equation_html
+    assert "C(sp3)-C(sp3) (single): Satisfied" in result_ethane.equation_text
+    assert "C(sp3)-H (single): Satisfied" in result_ethane.equation_text
+
+    # Hexamethylenetetramine (HMTA) - falls back to elemental balance (Not satisfied)
+    mol_hmta = Chem.MolFromSmiles("C1N2CN3CN1CN(C2)C3")
+    result_hmta = analyze_molecule(mol_hmta)
+    assert "Hyperhomodesmotic condition: Not satisfied" in result_hmta.equation_text
+    assert "Hyperhomodesmotic condition:</span> <span style=\"color:#f28b82; font-weight:bold;\">Not satisfied</span>" in result_hmta.equation_html
+
+
+

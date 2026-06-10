@@ -893,11 +893,23 @@ def build_equation_text(
     if unresolved_right != "none":
         rhs_parts.append(f"unresolved right species ({unresolved_right})")
     rhs = " + ".join(rhs_parts)
+    is_hyper = (reaction_type == "Hyperhomodesmotic")
+    hyper_status = "Satisfied" if is_hyper else "Not satisfied"
+    bond_status_lines = []
+    for btype in sorted(set(lhs_bonds) | set(rhs_bonds)):
+        l_c = lhs_bonds[btype]
+        r_c = rhs_bonds[btype]
+        status = "Satisfied" if l_c == r_c else f"Not satisfied (LHS: {l_c}, RHS: {r_c})"
+        bond_status_lines.append(f"  - {btype}: {status}")
+    bond_status_text = "\n".join(bond_status_lines) if bond_status_lines else "  - No bonds detected"
+
     return (
         "Homodesmotic Draft Equation\n"
         "===========================\n\n"
         f"{lhs} -> {rhs}\n\n"
-        f"Reaction type: {reaction_type}\n\n"
+        f"Reaction type: {reaction_type}\n"
+        f"Hyperhomodesmotic condition: {hyper_status}\n"
+        f"Bond-type conservation status:\n{bond_status_text}\n\n"
         f"Target atom count: {format_counter(target_atoms)}\n"
         f"Reference-side atom count: {format_counter(reference_atoms)}\n"
         f"Reference minus target atom delta: {format_counter(atom_delta)}\n\n"
@@ -1173,6 +1185,23 @@ def build_equation_html(
     if is_elemental_balance:
         warning_html = '<p style="color:#f28b82; font-weight:bold;">⚠️ Note: Calculated in elemental balance mode due to environment matching constraints.</p>'
 
+    is_hyper = (reaction_type == "Hyperhomodesmotic")
+    hyper_status_html = '<span style="color:#81c995; font-weight:bold;">Satisfied</span>' if is_hyper else '<span style="color:#f28b82; font-weight:bold;">Not satisfied</span>'
+    bond_status_htmls = []
+    for btype in sorted(set(lhs_bonds) | set(rhs_bonds)):
+        l_c = lhs_bonds[btype]
+        r_c = rhs_bonds[btype]
+        if l_c == r_c:
+            status_html = '<span style="color:#81c995; font-weight:bold;">Satisfied</span>'
+        else:
+            status_html = f'<span style="color:#f28b82; font-weight:bold;">Not satisfied</span> (LHS: {l_c}, RHS: {r_c})'
+        bond_status_htmls.append(f'<li><span style="color:#e8eaed;">{btype}</span>: {status_html}</li>')
+    
+    if bond_status_htmls:
+        bond_status_list_html = '<ul style="margin: 4px 0 0 16px; padding: 0; list-style-type: disc; color: #9aa0a6;">' + "".join(bond_status_htmls) + '</ul>'
+    else:
+        bond_status_list_html = '<p style="margin: 4px 0 0 16px; color: #9aa0a6;">No bonds detected.</p>'
+
     return (
         '<div style="font-family:Consolas, monospace; color:#e8eaed;">'
         '<h3 style="margin:0 0 8px 0; color:#e8eaed;">Homodesmotic Draft Equation</h3>'
@@ -1182,6 +1211,8 @@ def build_equation_html(
         '<hr style="border:0; border-top:1px solid #3c4043;">'
         f'<p><span style="color:#9aa0a6;">Reaction Type:</span> '
         f'<span style="color:{get_reaction_type_color(reaction_type)}; font-weight:bold;">{reaction_type}</span></p>'
+        f'<p><span style="color:#9aa0a6;">Hyperhomodesmotic condition:</span> {hyper_status_html}</p>'
+        f'<div style="margin-bottom:12px;"><span style="color:#9aa0a6;">Bond-type conservation status:</span>{bond_status_list_html}</div>'
         f'<p><span style="color:#9aa0a6;">Target atom count:</span> '
         f'{_html_counter(target_atoms, "#e8eaed", "Target atom")}</p>'
         f'<p><span style="color:#9aa0a6;">Reference-side atom count:</span> '
@@ -1421,8 +1452,17 @@ def export_analysis(
                 writer.writerow(
                     [match.name, match.count, match.reference_smiles, match.description]
                 )
-        writer.writerow([])
         writer.writerow(["Reaction Type", result.reaction_type])
+        writer.writerow(["Hyperhomodesmotic condition", "Satisfied" if result.reaction_type == "Hyperhomodesmotic" else "Not satisfied"])
+        writer.writerow([])
+        writer.writerow(["Bond-type conservation status"])
+        writer.writerow(["Bond Type", "LHS Count", "RHS Count", "Status"])
+        for btype in sorted(set(result.lhs_bonds) | set(result.rhs_bonds)):
+            l_c = result.lhs_bonds[btype]
+            r_c = result.rhs_bonds[btype]
+            status = "Satisfied" if l_c == r_c else "Not satisfied"
+            writer.writerow([btype, l_c, r_c, status])
+        writer.writerow([])
         writer.writerow(["Target atom count", format_counter(result.target_atoms)])
         writer.writerow(["Reference-side atom count", format_counter(result.reference_atoms)])
         writer.writerow(["Reference minus target atom delta", format_counter(result.atom_delta)])
