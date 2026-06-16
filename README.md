@@ -6,6 +6,8 @@ reference molecules for draft homodesmotic or isodesmic reaction balancing.
 
 Repo: [https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/](https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/)
 
+![](img/main.png)
+
 ## Features
 
 - **Expanded Support**: Auto-detects and balances ketones, aldehydes, amines (primary, secondary, tertiary), and extended alkanes.
