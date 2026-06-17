@@ -1,5 +1,8 @@
 # Strain Homodesmotic Reaction Generator
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20725908.svg)](https://doi.org/10.5281/zenodo.20725908)
+[![CI](https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/actions/workflows/ci.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/actions/workflows/ci.yml)
+
 This folder contains a MoleditPy plugin that detects common local bonding
 environments in strained or highly constrained molecules and proposes small
 reference molecules for draft homodesmotic or isodesmic reaction balancing.
