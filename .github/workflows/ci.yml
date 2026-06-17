@@ -27,6 +27,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install rdkit numpy scipy pytest
 
+    - name: Clone main app (real-context integration tests)
+      run: git clone --depth 1 https://github.com/HiroYokoyama/python_molecular_editor.git ../python_molecular_editor || true
+
     - name: Run tests
+      env:
+        CI_MAIN_APP_SRC: ../python_molecular_editor/moleditpy/src
       run: |
         pytest
