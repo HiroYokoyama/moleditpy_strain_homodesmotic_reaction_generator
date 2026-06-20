@@ -44,7 +44,7 @@ jobs:
         run: |
           TAG="${{ github.event.inputs.version }}"
           gh release create "$TAG" \
-            --title "Strain/Homodesmotic Reaction Generator $TAG" \
+            --title "Strain Homodesmotic Reaction Generator $TAG" \
             --generate-notes \
             "strain_homodesmotic_reaction_generator_$TAG.zip"
 
