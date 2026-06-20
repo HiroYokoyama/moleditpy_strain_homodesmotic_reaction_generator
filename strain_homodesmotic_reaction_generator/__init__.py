@@ -16,6 +16,7 @@ PLUGIN_DESCRIPTION = (
     "Detect strain-molecule bonding environments and build a draft homodesmotic "
     "reaction balance."
 )
+PLUGIN_SUPPORTED_MOLEDITPY_VERSION = ">=3.0.0, <5.0.0"
 
 
 def initialize(context: Any) -> None:
