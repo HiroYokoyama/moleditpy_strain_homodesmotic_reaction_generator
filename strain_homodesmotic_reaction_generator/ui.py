@@ -46,6 +46,7 @@ from .core import (
     AnalysisResult,
     analyze_molecule,
     export_analysis,
+    milp,
 )
 
 WINDOW_ID = "strain_homodesmotic_reaction_generator"
@@ -154,9 +155,7 @@ if QDialog is not None:
             intro.setWordWrap(True)
             layout.addWidget(intro)
 
-            self.warning_label = QLabel(
-                "⚠️ SciPy not detected or exact MILP balance impossible; operating in elemental balance mode."
-            )
+            self.warning_label = QLabel("")
             self.warning_label.setStyleSheet("color: #fde293; font-weight: bold;")
             self.warning_label.setVisible(False)
             layout.addWidget(self.warning_label)
@@ -255,6 +254,17 @@ if QDialog is not None:
             self.last_result = result
             self._populate_table(self.last_result)
             self.equation_box.setHtml(self.last_result.equation_html)
+            if self.last_result.is_elemental_balance:
+                if milp is None:
+                    self.warning_label.setText(
+                        "⚠️ SciPy not found — install scipy for exact MILP balance; "
+                        "operating in elemental balance mode."
+                    )
+                else:
+                    self.warning_label.setText(
+                        "⚠️ No exact MILP balance possible for this molecule; "
+                        "operating in elemental balance mode."
+                    )
             self.warning_label.setVisible(self.last_result.is_elemental_balance)
             _status(
                 self.context,
