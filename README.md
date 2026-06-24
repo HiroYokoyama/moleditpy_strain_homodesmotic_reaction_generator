@@ -59,3 +59,6 @@ The tests require RDKit and PyTest. The GUI requires PyQt6. The MILP solver requ
 ## Reference
 [1] S. E. Wheeler, K. N. Houk, P. v. R. Schleyer, W. D. Allen, “A Hierarchy of Homodesmotic Reactions for Thermochemistry” *J. Am. Chem. Soc.* **2009**, *131*, 2547–2560.
 
+## License & Disclaimer
+
+This is open-source software distributed under the GNU GPL v3 license. It is provided 'as is' without warranty of any kind, and the author assumes no responsibility or liability for the results. Although outputs have been carefully verified, users are strongly encouraged to independently check and validate results for critical purposes (such as publications). If you encounter any bugs, please open an issue.
