@@ -11,6 +11,7 @@ import csv
 import html
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
@@ -29,7 +30,13 @@ except ImportError:
     milp = None
 
 
-from .data import EnvironmentRule, BalanceSpecies, ENVIRONMENTS, BALANCE_SPECIES, _BALANCE_CORE_MAP
+from .data import (
+    EnvironmentRule,
+    BalanceSpecies,
+    ENVIRONMENTS,
+    BALANCE_SPECIES,
+    _BALANCE_CORE_MAP,
+)
 
 
 @dataclass(frozen=True)
@@ -148,11 +155,15 @@ def count_groups(mol: Any) -> Counter[str]:
                         c_triple += 1
                     elif bond.GetBondType() == Chem.BondType.AROMATIC:
                         c_aromatic += 1
-            
+
             if atom.GetIsAromatic():
-                counts[f"C_ar(H{h_count})(O_s{o_single})(O_d{o_double})(N_s{n_single})(N_d{n_double})(N_t{n_triple})(ar{c_aromatic})"] += 1
+                counts[
+                    f"C_ar(H{h_count})(O_s{o_single})(O_d{o_double})(N_s{n_single})(N_d{n_double})(N_t{n_triple})(ar{c_aromatic})"
+                ] += 1
             else:
-                counts[f"C(H{h_count})(O_s{o_single})(O_d{o_double})(N_s{n_single})(N_d{n_double})(N_t{n_triple})(=C{c_double})(#C{c_triple})"] += 1
+                counts[
+                    f"C(H{h_count})(O_s{o_single})(O_d{o_double})(N_s{n_single})(N_d{n_double})(N_t{n_triple})(=C{c_double})(#C{c_triple})"
+                ] += 1
     return counts
 
 
@@ -205,19 +216,8 @@ def bond_counts_helper(mol: Any) -> Counter[str]:
     if mol is None:
         return counts
     for bond in mol.GetBonds():
-        ba = bond.GetBeginAtom()
-        ea = bond.GetEndAtom()
-
-        def format_atom(atom: Any) -> str:
-            sym = atom.GetSymbol()
-            if sym == "H":
-                return "H"
-            hyb = str(atom.GetHybridization()).lower()
-            h_count = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 1)
-            return f"{sym}({hyb},H{h_count})"
-
-        a1_label = format_atom(ba)
-        a2_label = format_atom(ea)
+        a1_label = get_atom_state(bond.GetBeginAtom())
+        a2_label = get_atom_state(bond.GetEndAtom())
         pair = sorted([a1_label, a2_label])
 
         btype = bond.GetBondType()
@@ -447,7 +447,9 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
     milp_success = False
 
     if milp is not None and np is not None:
-        left_balance_terms, right_balance_terms, milp_success = build_hyperhomodesmotic_balance_terms(group_delta)
+        left_balance_terms, right_balance_terms, milp_success = (
+            build_hyperhomodesmotic_balance_terms(group_delta)
+        )
 
     if not milp_success:
         left_needed = Counter(
@@ -484,7 +486,12 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         cancel_qty = cancellations.get(term.smiles, 0)
         new_count = max(0, term.count - cancel_qty)
         new_left_balance_terms.append(
-            BalanceTerm(name=term.name, smiles=term.smiles, count=new_count, description=term.description)
+            BalanceTerm(
+                name=term.name,
+                smiles=term.smiles,
+                count=new_count,
+                description=term.description,
+            )
         )
 
     new_right_balance_terms = []
@@ -498,36 +505,31 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         else:
             new_count = term.count
         new_right_balance_terms.append(
-            BalanceTerm(name=term.name, smiles=term.smiles, count=new_count, description=term.description)
-        )
-
-    new_rhs_terms = []
-    for term in rhs_terms:
-        cancel_qty = rhs_cancel_remaining.get(term.smiles, 0)
-        if cancel_qty > 0:
-            sub = min(term.count, cancel_qty)
-            new_count = term.count - sub
-            rhs_cancel_remaining[term.smiles] -= sub
-        else:
-            new_count = term.count
-        new_rhs_terms.append(
-            ReferenceTerm(
-                count=new_count,
+            BalanceTerm(
+                name=term.name,
                 smiles=term.smiles,
-                original_atom_indices=term.original_atom_indices,
+                count=new_count,
+                description=term.description,
             )
         )
 
+    new_rhs_terms = []
     new_matches = []
-    rhs_cancel_remaining_matches = Counter(cancellations)
-    for match in matches:
-        cancel_qty = rhs_cancel_remaining_matches.get(match.reference_smiles, 0)
+    for rhs_term, match in zip(rhs_terms, matches):
+        cancel_qty = rhs_cancel_remaining.get(rhs_term.smiles, 0)
         if cancel_qty > 0:
-            sub = min(match.count, cancel_qty)
-            new_count = match.count - sub
-            rhs_cancel_remaining_matches[match.reference_smiles] -= sub
+            sub = min(rhs_term.count, cancel_qty)
+            new_count = rhs_term.count - sub
+            rhs_cancel_remaining[rhs_term.smiles] -= sub
         else:
-            new_count = match.count
+            new_count = rhs_term.count
+        new_rhs_terms.append(
+            ReferenceTerm(
+                count=new_count,
+                smiles=rhs_term.smiles,
+                original_atom_indices=rhs_term.original_atom_indices,
+            )
+        )
         new_matches.append(
             EnvironmentMatch(
                 name=match.name,
@@ -549,7 +551,9 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         if term.count > 0:
             ref_mol = Chem.MolFromSmiles(term.smiles)
             if ref_mol is not None:
-                for element, number in atom_counts(explicit_hydrogen_copy(ref_mol)).items():
+                for element, number in atom_counts(
+                    explicit_hydrogen_copy(ref_mol)
+                ).items():
                     reference_atoms[element] += number * term.count
 
     atom_delta = Counter()
@@ -690,7 +694,9 @@ def _subtract_counter(remaining: Counter[str], candidate: Counter[str]) -> Count
 
 
 def _counter_key(values: Counter[str]) -> tuple[tuple[str, int], ...]:
-    return tuple(sorted((element, count) for element, count in values.items() if count > 0))
+    return tuple(
+        sorted((element, count) for element, count in values.items() if count > 0)
+    )
 
 
 def _solution_score(
@@ -703,10 +709,18 @@ def _solution_score(
         for element, count in candidates[index][1].items()
         if element != "H"
     )
-    min_heavy = min(
-        sum(count for element, count in candidates[index][1].items() if element != "H")
-        for index in indexes
-    ) if indexes else 0
+    min_heavy = (
+        min(
+            sum(
+                count
+                for element, count in candidates[index][1].items()
+                if element != "H"
+            )
+            for index in indexes
+        )
+        if indexes
+        else 0
+    )
     names = ",".join(candidates[index][0].name for index in indexes)
     return (len(indexes), -heavy_atoms, -min_heavy, names)
 
@@ -727,6 +741,7 @@ def _search_balance(
             return ()
 
         best: tuple[int, ...] | None = None
+        best_score: tuple | None = None
         for index in range(start_index, len(candidates)):
             _species, counts = candidates[index]
             if not _counter_fits(counts, remaining):
@@ -738,10 +753,10 @@ def _search_balance(
                 continue
 
             solution = (index, *tail)
-            if best is None or _solution_score(solution, candidates) < _solution_score(
-                best, candidates
-            ):
+            score = _solution_score(solution, candidates)
+            if best_score is None or score < best_score:
                 best = solution
+                best_score = score
 
         return best
 
@@ -754,17 +769,19 @@ def build_hyperhomodesmotic_balance_terms(
     """Solve for a perfectly balanced hyperhomodesmotic reaction using MILP."""
     if not group_delta:
         return (), (), True
-        
+
     species_list = []
     for species in BALANCE_SPECIES:
         mol = Chem.MolFromSmiles(species.smiles)
         if mol is not None:
             species_list.append((species, count_groups(mol)))
-            
+
     if not species_list:
         return (), (), False
 
-    group_names = sorted(list(set(k for _, c in species_list for k in c.keys()) | set(group_delta.keys())))
+    group_names = sorted(
+        set(k for _, c in species_list for k in c.keys()) | set(group_delta.keys())
+    )
     n_groups = len(group_names)
     n_species = len(species_list)
 
@@ -778,7 +795,7 @@ def build_hyperhomodesmotic_balance_terms(
 
     c = np.ones(2 * n_species)
     for j, (species, _) in enumerate(species_list):
-        heavy = sum(1 for char in species.smiles if char.isalpha() and char != 'H')
+        heavy = sum(1 for char in species.smiles if char.isalpha() and char != "H")
         cost = 1.0
         if heavy == 1:
             cost = 1.02
@@ -790,7 +807,9 @@ def build_hyperhomodesmotic_balance_terms(
     integrality = np.ones(2 * n_species)
 
     try:
-        res = milp(c=c, constraints=LinearConstraint(A_eq, b_eq, b_eq), integrality=integrality)
+        res = milp(
+            c=c, constraints=LinearConstraint(A_eq, b_eq, b_eq), integrality=integrality
+        )
         if not res.success:
             return (), (), False
     except Exception:
@@ -798,19 +817,33 @@ def build_hyperhomodesmotic_balance_terms(
 
     u = np.round(res.x[:n_species]).astype(int)
     v = np.round(res.x[n_species:]).astype(int)
-    
+
     left_terms = []
     for j, count in enumerate(u):
         if count > 0:
             species = species_list[j][0]
-            left_terms.append(BalanceTerm(species.name, species.smiles, int(count), description=species.description))
-            
+            left_terms.append(
+                BalanceTerm(
+                    species.name,
+                    species.smiles,
+                    int(count),
+                    description=species.description,
+                )
+            )
+
     right_terms = []
     for j, count in enumerate(v):
         if count > 0:
             species = species_list[j][0]
-            right_terms.append(BalanceTerm(species.name, species.smiles, int(count), description=species.description))
-            
+            right_terms.append(
+                BalanceTerm(
+                    species.name,
+                    species.smiles,
+                    int(count),
+                    description=species.description,
+                )
+            )
+
     return tuple(left_terms), tuple(right_terms), True
 
 
@@ -843,7 +876,9 @@ def build_balance_terms(
 
     grouped = Counter(candidate_tuple[index][0] for index in solution)
     terms = tuple(
-        BalanceTerm(species.name, species.smiles, count, description=species.description)
+        BalanceTerm(
+            species.name, species.smiles, count, description=species.description
+        )
         for species, count in sorted(grouped.items(), key=lambda item: item[0].name)
     )
     return terms, Counter()
@@ -868,8 +903,8 @@ def build_equation_text(
     target_bonds: Counter[str],
     reaction_bonds_delta: Counter[str],
     reaction_type: str,
-    lhs_bonds: Counter[str] = None,
-    rhs_bonds: Counter[str] = None,
+    lhs_bonds: Counter[str] | None = None,
+    rhs_bonds: Counter[str] | None = None,
 ) -> str:
     if lhs_bonds is None:
         lhs_bonds = Counter()
@@ -894,15 +929,21 @@ def build_equation_text(
     if unresolved_right != "none":
         rhs_parts.append(f"unresolved right species ({unresolved_right})")
     rhs = " + ".join(rhs_parts)
-    is_hyper = (reaction_type == "Hyperhomodesmotic")
+    is_hyper = reaction_type == "Hyperhomodesmotic"
     hyper_status = "Satisfied" if is_hyper else "Not satisfied"
     bond_status_lines = []
     for btype in sorted(set(lhs_bonds) | set(rhs_bonds)):
         l_c = lhs_bonds[btype]
         r_c = rhs_bonds[btype]
-        status = f"Satisfied (LHS: {l_c}, RHS: {r_c})" if l_c == r_c else f"Not satisfied (LHS: {l_c}, RHS: {r_c}, Delta: {r_c - l_c:+})"
+        status = (
+            f"Satisfied (LHS: {l_c}, RHS: {r_c})"
+            if l_c == r_c
+            else f"Not satisfied (LHS: {l_c}, RHS: {r_c}, Delta: {r_c - l_c:+})"
+        )
         bond_status_lines.append(f"  - {btype}: {status}")
-    bond_status_text = "\n".join(bond_status_lines) if bond_status_lines else "  - No bonds detected"
+    bond_status_text = (
+        "\n".join(bond_status_lines) if bond_status_lines else "  - No bonds detected"
+    )
 
     return (
         "Homodesmotic Draft Equation\n"
@@ -939,9 +980,7 @@ def build_equation_text(
 
 def format_terms(terms: Iterable[BalanceTerm]) -> str:
     parts = [
-        f"{term.count} {term.smiles} ({term.name})"
-        for term in terms
-        if term.count > 0
+        f"{term.count} {term.smiles} ({term.name})" for term in terms if term.count > 0
     ]
     return " + ".join(parts) if parts else "none"
 
@@ -955,7 +994,9 @@ def _span(text: str, color: str, title: str = "") -> str:
     safe_text = html.escape(text)
     safe_title = html.escape(title)
     title_attr = f' title="{safe_title}"' if safe_title else ""
-    return f'<span style="color:{color}; font-weight:600;"{title_attr}>{safe_text}</span>'
+    return (
+        f'<span style="color:{color}; font-weight:600;"{title_attr}>{safe_text}</span>'
+    )
 
 
 def color_smiles_atoms(smiles: str, color: str, title: str) -> str:
@@ -968,7 +1009,7 @@ def color_smiles_atoms_by_index(
     indexed_colors: dict[int, tuple[str, str]],
     default_color: str,
     default_title: str,
- ) -> str:
+) -> str:
     """Color atom tokens inside a SMILES string using atom-token indexes."""
     organic_two_letter_atoms = {"Cl", "Br"}
     organic_one_letter_atoms = set("BCNOPSFIbcnops")
@@ -991,14 +1032,18 @@ def color_smiles_atoms_by_index(
 
         two_letter = smiles[index : index + 2]
         if two_letter in organic_two_letter_atoms:
-            color, title = indexed_colors.get(atom_index, (default_color, default_title))
+            color, title = indexed_colors.get(
+                atom_index, (default_color, default_title)
+            )
             pieces.append(_span(two_letter, color, title))
             atom_index += 1
             index += 2
             continue
 
         if char in organic_one_letter_atoms:
-            color, title = indexed_colors.get(atom_index, (default_color, default_title))
+            color, title = indexed_colors.get(
+                atom_index, (default_color, default_title)
+            )
             pieces.append(_span(char, color, title))
             atom_index += 1
             index += 1
@@ -1041,7 +1086,10 @@ def color_reference_term(
 
     indexed_colors = {}
     for atom_idx in true_core_atoms:
-        indexed_colors[atom_idx] = (original_color, "Original strain-environment atom in reference fragment")
+        indexed_colors[atom_idx] = (
+            original_color,
+            "Original strain-environment atom in reference fragment",
+        )
 
     smiles = color_smiles_atoms_by_index(
         term.smiles,
@@ -1059,7 +1107,6 @@ def _html_counter(values: Counter[str], color: str, title: str) -> str:
         f"{_span(element, color, title)}: {values[element]}"
         for element in sorted(values)
     )
-
 
 
 def _html_terms(
@@ -1082,7 +1129,7 @@ def _html_terms(
                 "Added balancing atom",
             )
             parts.append(
-                f'{term.count} {smiles} '
+                f"{term.count} {smiles} "
                 f'<span style="color:#9aa0a6;">({html.escape(term.name)})</span>'
             )
     return " + ".join(parts) if parts else "none"
@@ -1111,11 +1158,11 @@ def build_equation_html(
     unresolved_left_atoms: Counter[str],
     unresolved_right_atoms: Counter[str],
     is_elemental_balance: bool = False,
-    target_bonds: Counter[str] = None,
-    reaction_bonds_delta: Counter[str] = None,
+    target_bonds: Counter[str] | None = None,
+    reaction_bonds_delta: Counter[str] | None = None,
     reaction_type: str = "Unbalanced",
-    lhs_bonds: Counter[str] = None,
-    rhs_bonds: Counter[str] = None,
+    lhs_bonds: Counter[str] | None = None,
+    rhs_bonds: Counter[str] | None = None,
 ) -> str:
     """Build a styled HTML representation of the homodesmotic equation.
 
@@ -1143,18 +1190,24 @@ def build_equation_html(
         rhs_bonds = Counter()
 
     left_balance = _html_terms(left_balance_terms, balance_core_color, left_added_color)
-    right_balance = _html_terms(right_balance_terms, balance_core_color, right_added_color)
-    unresolved_left = _html_counter(unresolved_left_atoms, unresolved_color, "Unresolved left-side atom")
-    unresolved_right = _html_counter(unresolved_right_atoms, unresolved_color, "Unresolved right-side atom")
+    right_balance = _html_terms(
+        right_balance_terms, balance_core_color, right_added_color
+    )
+    unresolved_left = _html_counter(
+        unresolved_left_atoms, unresolved_color, "Unresolved left-side atom"
+    )
+    unresolved_right = _html_counter(
+        unresolved_right_atoms, unresolved_color, "Unresolved right-side atom"
+    )
 
     target_label = target_smiles or "Target"
-    lhs_parts = [
-        color_smiles_atoms(target_label, target_color, "Original target atom")
-    ]
+    lhs_parts = [color_smiles_atoms(target_label, target_color, "Original target atom")]
     if left_balance != "none":
         lhs_parts.append(left_balance)
     if unresolved_left != "none":
-        lhs_parts.append(f'{_span("unresolved left species", unresolved_color)} ({unresolved_left})')
+        lhs_parts.append(
+            f"{_span('unresolved left species', unresolved_color)} ({unresolved_left})"
+        )
 
     rhs_parts = [
         " + ".join(
@@ -1171,14 +1224,20 @@ def build_equation_html(
     if right_balance != "none":
         rhs_parts.append(right_balance)
     if unresolved_right != "none":
-        rhs_parts.append(f'{_span("unresolved right species", unresolved_color)} ({unresolved_right})')
+        rhs_parts.append(
+            f"{_span('unresolved right species', unresolved_color)} ({unresolved_right})"
+        )
 
     warning_html = ""
     if is_elemental_balance:
         warning_html = '<p style="color:#fde293; font-weight:bold;">⚠️ Note: Calculated in elemental balance mode due to environment matching constraints.</p>'
 
-    is_hyper = (reaction_type == "Hyperhomodesmotic")
-    hyper_status_html = '<span style="color:#81c995; font-weight:bold;">Satisfied</span>' if is_hyper else '<span style="color:#f28b82; font-weight:bold;">Not satisfied</span>'
+    is_hyper = reaction_type == "Hyperhomodesmotic"
+    hyper_status_html = (
+        '<span style="color:#81c995; font-weight:bold;">Satisfied</span>'
+        if is_hyper
+        else '<span style="color:#f28b82; font-weight:bold;">Not satisfied</span>'
+    )
     bond_status_htmls = []
     for btype in sorted(set(lhs_bonds) | set(rhs_bonds)):
         l_c = lhs_bonds[btype]
@@ -1187,17 +1246,25 @@ def build_equation_html(
             status_html = f'<span style="color:#81c995; font-weight:bold;">Satisfied</span> (LHS: {l_c}, RHS: {r_c})'
         else:
             status_html = f'<span style="color:#f28b82; font-weight:bold;">Not satisfied</span> (LHS: {l_c}, RHS: {r_c}, Delta: {r_c - l_c:+})'
-        bond_status_htmls.append(f'<li><span style="color:#e8eaed;">{btype}</span>: {status_html}</li>')
-    
+        bond_status_htmls.append(
+            f'<li><span style="color:#e8eaed;">{btype}</span>: {status_html}</li>'
+        )
+
     if bond_status_htmls:
-        bond_status_list_html = '<ul style="margin: 4px 0 0 16px; padding: 0; list-style-type: disc; color: #9aa0a6;">' + "".join(bond_status_htmls) + '</ul>'
+        bond_status_list_html = (
+            '<ul style="margin: 4px 0 0 16px; padding: 0; list-style-type: disc; color: #9aa0a6;">'
+            + "".join(bond_status_htmls)
+            + "</ul>"
+        )
     else:
-        bond_status_list_html = '<p style="margin: 4px 0 0 16px; color: #9aa0a6;">No bonds detected.</p>'
+        bond_status_list_html = (
+            '<p style="margin: 4px 0 0 16px; color: #9aa0a6;">No bonds detected.</p>'
+        )
 
     return (
         '<div style="font-family:Consolas, monospace; color:#e8eaed;">'
         '<h3 style="margin:0 0 8px 0; color:#e8eaed;">Homodesmotic Draft Equation</h3>'
-        f'{warning_html}'
+        f"{warning_html}"
         f'<p style="font-size:16px; font-weight:500; line-height:1.6; margin:16px 0;">{" + ".join(lhs_parts)} '
         f'<span style="color:#e8eaed;">-&gt;</span> {" + ".join(rhs_parts)}</p>'
         '<hr style="border:0; border-top:1px solid #3c4043;">'
@@ -1206,31 +1273,31 @@ def build_equation_html(
         f'<p><span style="color:#9aa0a6;">Hyperhomodesmotic condition:</span> {hyper_status_html}</p>'
         f'<div style="margin-bottom:12px;"><span style="color:#9aa0a6;">Bond-type conservation status:</span>{bond_status_list_html}</div>'
         f'<p><span style="color:#9aa0a6;">Target atom count:</span> '
-        f'{_html_counter(target_atoms, "#e8eaed", "Target atom")}</p>'
+        f"{_html_counter(target_atoms, '#e8eaed', 'Target atom')}</p>"
         f'<p><span style="color:#9aa0a6;">Reference-side atom count:</span> '
-        f'{_html_counter(reference_atoms, "#e8eaed", "Reference atom")}</p>'
+        f"{_html_counter(reference_atoms, '#e8eaed', 'Reference atom')}</p>"
         f'<p><span style="color:#9aa0a6;">Reference minus target atom delta:</span> '
-        f'{_html_counter(atom_delta, "#e8eaed", "Atom-count difference")}</p>'
+        f"{_html_counter(atom_delta, '#e8eaed', 'Atom-count difference')}</p>"
         f'<p><span style="color:#9aa0a6;">Target bond counts:</span> '
-        f'{_html_counter(target_bonds, "#e8eaed", "Target bond")}</p>'
+        f"{_html_counter(target_bonds, '#e8eaed', 'Target bond')}</p>"
         f'<p><span style="color:#9aa0a6;">Left-side bond counts:</span> '
-        f'{_html_counter(lhs_bonds, "#e8eaed", "Left-side bond")}</p>'
+        f"{_html_counter(lhs_bonds, '#e8eaed', 'Left-side bond')}</p>"
         f'<p><span style="color:#9aa0a6;">Right-side bond counts:</span> '
-        f'{_html_counter(rhs_bonds, "#e8eaed", "Right-side bond")}</p>'
+        f"{_html_counter(rhs_bonds, '#e8eaed', 'Right-side bond')}</p>"
         f'<p><span style="color:#9aa0a6;">Reaction bond difference:</span> '
-        f'{_html_counter(reaction_bonds_delta, "#e8eaed", "Reaction bond difference")}</p>'
+        f"{_html_counter(reaction_bonds_delta, '#e8eaed', 'Reaction bond difference')}</p>"
         f'<p><span style="color:#9aa0a6;">Left-side balancing species:</span> {left_balance}</p>'
         f'<p><span style="color:#9aa0a6;">Right-side balancing species:</span> {right_balance}</p>'
         f'<p><span style="color:#9aa0a6;">Unresolved left-side atoms:</span> {unresolved_left}</p>'
         f'<p><span style="color:#9aa0a6;">Unresolved right-side atoms:</span> {unresolved_right}</p>'
         '<p style="color:#9aa0a6;">Blue = original target and reference cores, '
-        'yellow = balancing cores to adjust over-counted bonds, '
-        'green = automatically added left balance species and caps, '
-        'purple = automatically added right balance species, red = unresolved.</p>'
+        "yellow = balancing cores to adjust over-counted bonds, "
+        "green = automatically added left balance species and caps, "
+        "purple = automatically added right balance species, red = unresolved.</p>"
         '<p style="color:#9aa0a6; font-size:12px; margin-top:8px;">'
-        'Note: Common balancing species and reference molecules appearing on both sides '
-        'of the equation have been algebraically cancelled to prevent redundant reference calculations.</p>'
-        '</div>'
+        "Note: Common balancing species and reference molecules appearing on both sides "
+        "of the equation have been algebraically cancelled to prevent redundant reference calculations.</p>"
+        "</div>"
     )
 
 
@@ -1240,24 +1307,22 @@ def export_analysis(
     current_file_path: str | Path | None = None,
 ) -> None:
     """Export analysis output as HTML, CSV, or plain text."""
-    import os
-    from datetime import datetime
-
     output_path = Path(path)
-    filename = os.path.basename(current_file_path) if current_file_path else "Untitled"
+    filename = Path(current_file_path).name if current_file_path else "Untitled"
     generated_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     if output_path.suffix.lower() in {".html", ".htm"}:
         from . import PLUGIN_VERSION
+
         output_path.write_text(
             "<!doctype html>\n"
             "<html>\n"
             "<head>\n"
-            "    <meta charset=\"utf-8\">\n"
+            '    <meta charset="utf-8">\n'
             f"    <title>Strain Homodesmotic Reaction Report (v{PLUGIN_VERSION})</title>\n"
-            "    <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n"
-            "    <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n"
-            "    <link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap\" rel=\"stylesheet\">\n"
+            '    <link rel="preconnect" href="https://fonts.googleapis.com">\n'
+            '    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
+            '    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">\n'
             "    <style>\n"
             "        :root {\n"
             "            --bg-color: #121214;\n"
@@ -1353,20 +1418,20 @@ def export_analysis(
             "    </style>\n"
             "</head>\n"
             "<body>\n"
-            "    <div class=\"container\">\n"
-            "        <div class=\"report-header\">\n"
+            '    <div class="container">\n'
+            '        <div class="report-header">\n'
             "            <h1>Homodesmotic Reaction Report</h1>\n"
-            f"            <div class=\"meta-info\">File: {html.escape(filename)}</div>\n"
-            f"            <div class=\"meta-info\">Generated on: {generated_date}</div>\n"
-            f"            <div class=\"meta-info\">Generated by Strain Homodesmotic Reaction Generator plugin v{PLUGIN_VERSION}</div>\n"
+            f'            <div class="meta-info">File: {html.escape(filename)}</div>\n'
+            f'            <div class="meta-info">Generated on: {generated_date}</div>\n'
+            f'            <div class="meta-info">Generated by Strain Homodesmotic Reaction Generator plugin v{PLUGIN_VERSION}</div>\n'
             "        </div>\n"
             "        \n"
-            "        <div class=\"card\">\n"
+            '        <div class="card">\n'
             f"            {result.equation_html}\n"
             "        </div>\n"
             "        \n"
-            "        <div class=\"card\" style=\"padding-top: 20px;\">\n"
-            "            <h3 style=\"margin: 0 0 12px 0; font-size: 18px; font-weight: 500;\">Reaction Components</h3>\n"
+            '        <div class="card" style="padding-top: 20px;">\n'
+            '            <h3 style="margin: 0 0 12px 0; font-size: 18px; font-weight: 500;">Reaction Components</h3>\n'
             "            <table>\n"
             "                <thead>\n"
             "                    <tr>\n"
@@ -1379,22 +1444,22 @@ def export_analysis(
             "                </thead>\n"
             "                <tbody>\n"
             + "\n".join(
-                "                    <tr class=\"row-ref\">"
+                '                    <tr class="row-ref">'
                 "<td>Ref</td>"
                 f"<td>{html.escape(match.name)}</td>"
                 f"<td>{match.count}</td>"
-                f"<td class=\"smiles-mono\">{html.escape(match.reference_smiles)}</td>"
+                f'<td class="smiles-mono">{html.escape(match.reference_smiles)}</td>'
                 f"<td>{html.escape(match.description)}</td>"
                 "</tr>"
                 for match in result.matches
                 if match.count > 0
             )
             + "\n".join(
-                "                    <tr class=\"row-left\">"
+                '                    <tr class="row-left">'
                 "<td>Left Balance</td>"
                 f"<td>{html.escape(term.name)}</td>"
                 f"<td>{term.count}</td>"
-                f"<td class=\"smiles-mono\">{html.escape(term.smiles)}</td>"
+                f'<td class="smiles-mono">{html.escape(term.smiles)}</td>'
                 f"<td>{html.escape(term.description or 'Added left-side balance species')}</td>"
                 "</tr>"
                 for term in result.left_balance_terms
@@ -1402,11 +1467,11 @@ def export_analysis(
             )
             + "\n"
             + "\n".join(
-                "                    <tr class=\"row-right\">"
+                '                    <tr class="row-right">'
                 "<td>Right Balance</td>"
                 f"<td>{html.escape(term.name)}</td>"
                 f"<td>{term.count}</td>"
-                f"<td class=\"smiles-mono\">{html.escape(term.smiles)}</td>"
+                f'<td class="smiles-mono">{html.escape(term.smiles)}</td>'
                 f"<td>{html.escape(term.description or 'Added right-side balance species')}</td>"
                 "</tr>"
                 for term in result.right_balance_terms
@@ -1445,7 +1510,14 @@ def export_analysis(
                     [match.name, match.count, match.reference_smiles, match.description]
                 )
         writer.writerow(["Reaction Type", result.reaction_type])
-        writer.writerow(["Hyperhomodesmotic condition", "Satisfied" if result.reaction_type == "Hyperhomodesmotic" else "Not satisfied"])
+        writer.writerow(
+            [
+                "Hyperhomodesmotic condition",
+                "Satisfied"
+                if result.reaction_type == "Hyperhomodesmotic"
+                else "Not satisfied",
+            ]
+        )
         writer.writerow([])
         writer.writerow(["Bond-type conservation status"])
         writer.writerow(["Bond Type", "LHS Count", "RHS Count", "Delta", "Status"])
@@ -1454,19 +1526,38 @@ def export_analysis(
             r_c = result.rhs_bonds[btype]
             delta = r_c - l_c
             status = "Satisfied" if l_c == r_c else "Not satisfied"
-            writer.writerow([btype, l_c, r_c, f"{delta:+}" if delta != 0 else "0", status])
+            writer.writerow(
+                [btype, l_c, r_c, f"{delta:+}" if delta != 0 else "0", status]
+            )
         writer.writerow([])
         writer.writerow(["Target atom count", format_counter(result.target_atoms)])
-        writer.writerow(["Reference-side atom count", format_counter(result.reference_atoms)])
-        writer.writerow(["Reference minus target atom delta", format_counter(result.atom_delta)])
+        writer.writerow(
+            ["Reference-side atom count", format_counter(result.reference_atoms)]
+        )
+        writer.writerow(
+            ["Reference minus target atom delta", format_counter(result.atom_delta)]
+        )
         writer.writerow(["Target bond counts", format_counter(result.target_bonds)])
         writer.writerow(["Left-side bond counts", format_counter(result.lhs_bonds)])
         writer.writerow(["Right-side bond counts", format_counter(result.rhs_bonds)])
-        writer.writerow(["Reaction bond difference", format_counter(result.reaction_bonds_delta)])
-        writer.writerow(["Left-side balancing species", format_terms(result.left_balance_terms)])
-        writer.writerow(["Right-side balancing species", format_terms(result.right_balance_terms)])
-        writer.writerow(["Unresolved left-side atoms", format_counter(result.unresolved_left_atoms)])
-        writer.writerow(["Unresolved right-side atoms", format_counter(result.unresolved_right_atoms)])
+        writer.writerow(
+            ["Reaction bond difference", format_counter(result.reaction_bonds_delta)]
+        )
+        writer.writerow(
+            ["Left-side balancing species", format_terms(result.left_balance_terms)]
+        )
+        writer.writerow(
+            ["Right-side balancing species", format_terms(result.right_balance_terms)]
+        )
+        writer.writerow(
+            ["Unresolved left-side atoms", format_counter(result.unresolved_left_atoms)]
+        )
+        writer.writerow(
+            [
+                "Unresolved right-side atoms",
+                format_counter(result.unresolved_right_atoms),
+            ]
+        )
         writer.writerow([])
         writer.writerow(["Equation"])
         writer.writerow([result.equation_text])

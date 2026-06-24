@@ -18,7 +18,6 @@ from strain_homodesmotic_reaction_generator.core import (  # noqa: E402
 from strain_homodesmotic_reaction_generator import PLUGIN_DEPENDENCIES, PLUGIN_VERSION
 
 
-
 pytestmark = pytest.mark.skipif(Chem is None, reason="RDKit is not available")
 
 
@@ -126,7 +125,10 @@ def test_export_analysis_writes_colored_html(tmp_path):
     assert "<td>secondary carbon - secondary carbon</td>" in text_cyclopropane
     assert "<td>Left Balance</td>" in text_cyclopropane
     assert "<td>propane</td>" in text_cyclopropane
-    assert "<td>Three-carbon saturated hydrocarbon balance species.</td>" in text_cyclopropane
+    assert (
+        "<td>Three-carbon saturated hydrocarbon balance species.</td>"
+        in text_cyclopropane
+    )
 
 
 def test_export_analysis_writes_txt(tmp_path):
@@ -158,7 +160,7 @@ def test_analyze_methylamine_detects_primary_amine():
 
 
 def test_analyze_unsolvable_molecule_triggers_elemental_balance():
-    mol = Chem.MolFromSmiles("C1N2CN3CN1CN(C2)C3") # Hexamethylenetetramine
+    mol = Chem.MolFromSmiles("C1N2CN3CN1CN(C2)C3")  # Hexamethylenetetramine
     result = analyze_molecule(mol)
     assert result.is_elemental_balance
     assert "Calculated in elemental balance mode" in result.equation_html
@@ -187,6 +189,7 @@ def test_plugin_metadata():
 
 def test_analyze_fallback_triggered_when_milp_is_missing(monkeypatch):
     import strain_homodesmotic_reaction_generator.core as core
+
     monkeypatch.setattr(core, "milp", None)
     mol = Chem.MolFromSmiles("COC")
     result = core.analyze_molecule(mol)
@@ -230,7 +233,9 @@ def test_analyze_biphenyl_aromatic():
     assert "Aromatic-CH" in names
     assert "Aromatic-C-Aromatic" in names
     assert not result.is_elemental_balance
-    assert "c1ccc(-c2ccccc2)cc1 -> 1 c1ccc(-c2ccccc2)cc1" in result.equation_text.lower()
+    assert (
+        "c1ccc(-c2ccccc2)cc1 -> 1 c1ccc(-c2ccccc2)cc1" in result.equation_text.lower()
+    )
 
 
 def test_analyze_five_cpp_aromatic():
@@ -240,15 +245,19 @@ def test_analyze_five_cpp_aromatic():
     assert format_counter(result.target_atoms) == "C: 30, H: 20"
     assert format_counter(result.reference_atoms) == "C: 60, H: 50"
     assert format_counter(result.atom_delta) == "C: 30, H: 30"
-    
-    names_counts = {match.name: match.count for match in result.matches if match.count > 0}
+
+    names_counts = {
+        match.name: match.count for match in result.matches if match.count > 0
+    }
     assert names_counts.get("Aromatic-CH", 0) == 0
     assert names_counts.get("Aromatic-C-Aromatic", 0) == 5
-    
-    left_names = {term.name: term.count for term in result.left_balance_terms if term.count > 0}
+
+    left_names = {
+        term.name: term.count for term in result.left_balance_terms if term.count > 0
+    }
     assert left_names.get("Benzene", 0) == 5
     assert "ethane" not in left_names
-    
+
     right_active = [term for term in result.right_balance_terms if term.count > 0]
     assert len(right_active) == 0
 
@@ -303,7 +312,7 @@ def test_analyze_cyclopropane_balance_species_colored():
     result = analyze_molecule(mol)
     assert not result.is_elemental_balance
     assert "C1CC1 + 3 CCC (propane) -> 3 CCCC" in result.equation_text
-    
+
     # Check that propane (CCC) is colored atom-by-atom in HTML
     # The middle carbon should be yellow (#fde293), outer carbons should be green (#81c995)
     assert "color:#81c995" in result.equation_html
@@ -313,6 +322,7 @@ def test_analyze_cyclopropane_balance_species_colored():
     # Atom 1 (middle) has core_color (#fde293), Atom 0 & 2 have added_color (#81c995)
     # The SMILES string is "CCC", so the first C is green, second C is yellow, third C is green
     import re
+
     pattern = r'3\s+<span\s+style="color:#81c995;[^>]*>C</span><span\s+style="color:#fde293;[^>]*>C</span><span\s+style="color:#81c995;[^>]*>C</span>'
     assert re.search(pattern, result.equation_html) is not None
 
@@ -338,71 +348,77 @@ def test_reaction_type_classification():
     assert result_ethane.reaction_type == "Hyperhomodesmotic"
 
     # [5]CPP should also be classified as Hyperhomodesmotic
-    result_cpp = analyze_molecule(Chem.MolFromSmiles("c1cc2ccc1-c1ccc(cc1)-c1ccc(cc1)-c1ccc(cc1)-c1ccc-2cc1"))
+    result_cpp = analyze_molecule(
+        Chem.MolFromSmiles("c1cc2ccc1-c1ccc(cc1)-c1ccc(cc1)-c1ccc(cc1)-c1ccc-2cc1")
+    )
     assert result_cpp.reaction_type == "Hyperhomodesmotic"
 
     # Hexamethylenetetramine has environment matching constraints, falling back to Elemental Balance
     result_hmta = analyze_molecule(Chem.MolFromSmiles("C1N2CN3CN1CN(C2)C3"))
     assert result_hmta.reaction_type == "Elemental Balance"
 
+
 def test_reaction_type_classification_levels():
     from strain_homodesmotic_reaction_generator.core import (
         classify_reaction_type,
         BalanceTerm,
-        ReferenceTerm
+        ReferenceTerm,
     )
 
     # 1. Unbalanced: mismatched atoms or unresolved atoms
-    assert classify_reaction_type(
-        "CC",
-        (),
-        (),
-        (),
-        Counter({"C": 1}),
-        Counter()
-    ) == "Unbalanced"
+    assert (
+        classify_reaction_type("CC", (), (), (), Counter({"C": 1}), Counter())
+        == "Unbalanced"
+    )
 
     # 2. Hyperhomodesmotic (balanced environment groups and hybridized bonds)
-    assert classify_reaction_type(
-        "CC",
-        (),
-        (ReferenceTerm(1, "CC", (0, 1)),),
-        (),
-        Counter(),
-        Counter()
-    ) == "Hyperhomodesmotic"
+    assert (
+        classify_reaction_type(
+            "CC", (), (ReferenceTerm(1, "CC", (0, 1)),), (), Counter(), Counter()
+        )
+        == "Hyperhomodesmotic"
+    )
 
     # 3. Homodesmotic (balanced atoms and groups, but mismatched hybridized bonds)
     # e.g., 2 Propane -> Ethane + Butane
-    assert classify_reaction_type(
-        "CCC",
-        (BalanceTerm("propane", "CCC", 1),),
-        (),
-        (BalanceTerm("ethane", "CC", 1), BalanceTerm("butane", "CCCC", 1)),
-        Counter(),
-        Counter()
-    ) == "Homodesmotic"
+    assert (
+        classify_reaction_type(
+            "CCC",
+            (BalanceTerm("propane", "CCC", 1),),
+            (),
+            (BalanceTerm("ethane", "CC", 1), BalanceTerm("butane", "CCCC", 1)),
+            Counter(),
+            Counter(),
+        )
+        == "Homodesmotic"
+    )
 
     # 4. Isodesmic (balanced simple bonds, but mismatched hybridized bonds and groups)
     # e.g., Propene + Ethane -> Propane + Ethene
-    assert classify_reaction_type(
-        "CC=C",
-        (BalanceTerm("ethane", "CC", 1),),
-        (),
-        (BalanceTerm("propane", "CCC", 1), BalanceTerm("Ethene", "C=C", 1)),
-        Counter(),
-        Counter()
-    ) == "Isodesmic"
+    assert (
+        classify_reaction_type(
+            "CC=C",
+            (BalanceTerm("ethane", "CC", 1),),
+            (),
+            (BalanceTerm("propane", "CCC", 1), BalanceTerm("Ethene", "C=C", 1)),
+            Counter(),
+            Counter(),
+        )
+        == "Isodesmic"
+    )
 
     # 5. Elemental Balance (only atoms match, not bonds)
-    assert classify_reaction_type(
-        "C=C",
-        (BalanceTerm("methane", "C", 2),),
-        (),
-        (BalanceTerm("propane", "CCC", 1), BalanceTerm("methane", "C", 1)),
-        Counter(),
-        Counter()
-    ) == "Elemental Balance"
+    assert (
+        classify_reaction_type(
+            "C=C",
+            (BalanceTerm("methane", "C", 2),),
+            (),
+            (BalanceTerm("propane", "CCC", 1), BalanceTerm("methane", "C", 1)),
+            Counter(),
+            Counter(),
+        )
+        == "Elemental Balance"
+    )
 
 
 def test_hyperhomodesmotic_condition_reporting():
@@ -410,7 +426,10 @@ def test_hyperhomodesmotic_condition_reporting():
     mol_ethane = Chem.MolFromSmiles("CC")
     result_ethane = analyze_molecule(mol_ethane)
     assert "Hyperhomodesmotic condition: Satisfied" in result_ethane.equation_text
-    assert "Hyperhomodesmotic condition:</span> <span style=\"color:#81c995; font-weight:bold;\">Satisfied</span>" in result_ethane.equation_html
+    assert (
+        'Hyperhomodesmotic condition:</span> <span style="color:#81c995; font-weight:bold;">Satisfied</span>'
+        in result_ethane.equation_html
+    )
     assert "C(sp3,H3)-C(sp3,H3) (single): Satisfied" in result_ethane.equation_text
     assert "C(sp3,H3)-H (single): Satisfied" in result_ethane.equation_text
 
@@ -418,7 +437,10 @@ def test_hyperhomodesmotic_condition_reporting():
     mol_hmta = Chem.MolFromSmiles("C1N2CN3CN1CN(C2)C3")
     result_hmta = analyze_molecule(mol_hmta)
     assert "Hyperhomodesmotic condition: Not satisfied" in result_hmta.equation_text
-    assert "Hyperhomodesmotic condition:</span> <span style=\"color:#f28b82; font-weight:bold;\">Not satisfied</span>" in result_hmta.equation_html
+    assert (
+        'Hyperhomodesmotic condition:</span> <span style="color:#f28b82; font-weight:bold;">Not satisfied</span>'
+        in result_hmta.equation_html
+    )
 
 
 def test_analyze_five_cpp_coloring():
@@ -427,27 +449,24 @@ def test_analyze_five_cpp_coloring():
     assert not result.is_elemental_balance
 
     import re
+
     # Biphenyl on RHS: 5 c1ccc(-c2ccccc2)cc1
     # Both rings should be colored blue (#8ab4f8)
     pattern = (
-        r'5\s+'
+        r"5\s+"
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>1'
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
-        r'\(-'
+        r"\(-"
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>2'
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>2'
-        r'\)'
+        r"\)"
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>'
         r'<span\s+style="color:#8ab4f8;[^>]*>c</span>1'
     )
     assert re.search(pattern, result.equation_html) is not None
-
-
-
-

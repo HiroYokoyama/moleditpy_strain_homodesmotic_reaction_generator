@@ -58,28 +58,14 @@ def _status(context: Any, message: str, timeout: int = 3000) -> None:
 
 
 def _current_molecule(context: Any) -> Any:
-    main_window = context.get_main_window() if hasattr(context, "get_main_window") else None
-    state_manager = getattr(main_window, "state_manager", None)
-    data = getattr(state_manager, "data", None)
-    if hasattr(data, "to_rdkit_mol"):
-        try:
-            mol = data.to_rdkit_mol()
-            if mol is not None:
-                return mol
-        except Exception:
-            pass
-    return getattr(context, "current_molecule", None)
+    return context.current_molecule
 
 
 def _load_smiles_with_host(context: Any, smiles: str) -> bool:
     """Load a SMILES string through MoleditPy's native importer when available."""
-    main_window = context.get_main_window() if hasattr(context, "get_main_window") else None
-    importer = getattr(main_window, "string_importer_manager", None)
-    load_from_smiles = getattr(importer, "load_from_smiles", None)
-    if not callable(load_from_smiles):
+    if not hasattr(context, "load_from_smiles"):
         return False
-
-    load_from_smiles(smiles)
+    context.load_from_smiles(smiles)
     return True
 
 
@@ -87,6 +73,7 @@ if QDialog is not None:
 
     class AnalysisWorker(QObject):
         """Worker to run molecule analysis in a background thread."""
+
         finished = pyqtSignal(object)
         error = pyqtSignal(str)
 
@@ -101,20 +88,23 @@ if QDialog is not None:
             except Exception as e:
                 self.error.emit(str(e))
 
-
     class LoadingDialog(QDialog):
         """Modal loading dialog shown during background analysis."""
+
         def __init__(self, parent: Any) -> None:
             super().__init__(parent)
             self.setWindowTitle("Analyzing...")
             self.setModal(True)
-            self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint)
+            self.setWindowFlags(
+                self.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint
+            )
             layout = QVBoxLayout(self)
-            label = QLabel("Analyzing molecule & calculating homodesmotic balance...\nPlease wait.")
+            label = QLabel(
+                "Analyzing molecule & calculating homodesmotic balance...\nPlease wait."
+            )
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(label)
             self.resize(320, 100)
-
 
     class HomodesmoticAnalyzerDialog(QDialog):
         """Qt dialog for the analyzer."""
@@ -143,7 +133,10 @@ if QDialog is not None:
             )
 
             from . import PLUGIN_VERSION
-            self.setWindowTitle(f"Strain Homodesmotic Reaction Generator (v{PLUGIN_VERSION})")
+
+            self.setWindowTitle(
+                f"Strain Homodesmotic Reaction Generator (v{PLUGIN_VERSION})"
+            )
             self.resize(820, 640)
 
             layout = QVBoxLayout(self)
@@ -274,51 +267,92 @@ if QDialog is not None:
 
         def on_analysis_error(self, error_msg: str) -> None:
             self.analyze_button.setEnabled(True)
-            QMessageBox.critical(self, "Analysis Failed", f"An error occurred during analysis:\n{error_msg}")
+            QMessageBox.critical(
+                self,
+                "Analysis Failed",
+                f"An error occurred during analysis:\n{error_msg}",
+            )
             _status(self.context, "Analysis failed.", 5000)
 
         def _populate_table(self, result: AnalysisResult) -> None:
             matches = [m for m in result.matches if m.count > 0]
             left = [t for t in result.left_balance_terms if t.count > 0]
             right = [t for t in result.right_balance_terms if t.count > 0]
-            
+
             self.table.setRowCount(len(matches) + len(left) + len(right))
-            
+
             ref_color = QColor("#1a73e8")
             ref_bg = QColor("#1a73e8")
             ref_bg.setAlpha(30)
             ref_brush = QBrush(ref_color)
             ref_bg_brush = QBrush(ref_bg)
-            
+
             left_color = QColor("#1b7a2d")
             left_bg = QColor("#1b7a2d")
             left_bg.setAlpha(30)
             left_brush = QBrush(left_color)
             left_bg_brush = QBrush(left_bg)
-            
+
             right_color = QColor("#a142f4")
             right_bg = QColor("#a142f4")
             right_bg.setAlpha(30)
             right_brush = QBrush(right_color)
             right_bg_brush = QBrush(right_bg)
-            
+
             row = 0
             for match in matches:
-                self._set_colored_row(row, f"Ref: {match.name}", str(match.count), match.reference_smiles, ref_brush, ref_bg_brush)
+                self._set_colored_row(
+                    row,
+                    f"Ref: {match.name}",
+                    str(match.count),
+                    match.reference_smiles,
+                    ref_brush,
+                    ref_bg_brush,
+                )
                 self._add_load_button(row, match.reference_smiles, match.description)
                 row += 1
-                
+
             for term in left:
-                self._set_colored_row(row, f"Left Balance: {term.name}", str(term.count), term.smiles, left_brush, left_bg_brush)
-                self._add_load_button(row, term.smiles, term.description or "Added left-side balance species")
-                row += 1
-                
-            for term in right:
-                self._set_colored_row(row, f"Right Balance: {term.name}", str(term.count), term.smiles, right_brush, right_bg_brush)
-                self._add_load_button(row, term.smiles, term.description or "Added right-side balance species")
+                self._set_colored_row(
+                    row,
+                    f"Left Balance: {term.name}",
+                    str(term.count),
+                    term.smiles,
+                    left_brush,
+                    left_bg_brush,
+                )
+                self._add_load_button(
+                    row,
+                    term.smiles,
+                    term.description or "Added left-side balance species",
+                )
                 row += 1
 
-        def _set_colored_row(self, row: int, col0: str, col1: str, col2: str, fg_brush: QBrush, bg_brush: QBrush) -> None:
+            for term in right:
+                self._set_colored_row(
+                    row,
+                    f"Right Balance: {term.name}",
+                    str(term.count),
+                    term.smiles,
+                    right_brush,
+                    right_bg_brush,
+                )
+                self._add_load_button(
+                    row,
+                    term.smiles,
+                    term.description or "Added right-side balance species",
+                )
+                row += 1
+
+        def _set_colored_row(
+            self,
+            row: int,
+            col0: str,
+            col1: str,
+            col2: str,
+            fg_brush: QBrush,
+            bg_brush: QBrush,
+        ) -> None:
             for col, text in enumerate((col0, col1, col2)):
                 item = QTableWidgetItem(text)
                 item.setForeground(fg_brush)
@@ -356,8 +390,16 @@ if QDialog is not None:
                 return
 
             try:
-                main_window = self.context.get_main_window() if hasattr(self.context, "get_main_window") else None
-                current_file_path = getattr(main_window.init_manager, "current_file_path", None) if hasattr(main_window, "init_manager") else None
+                main_window = (
+                    self.context.get_main_window()
+                    if hasattr(self.context, "get_main_window")
+                    else None
+                )
+                current_file_path = (
+                    getattr(main_window.init_manager, "current_file_path", None)
+                    if hasattr(main_window, "init_manager")
+                    else None
+                )
                 export_analysis(path, self.last_result, current_file_path)
             except OSError as exc:
                 QMessageBox.critical(self, "Export Failed", str(exc))

@@ -14,6 +14,7 @@ CI setup
       run: git clone --depth 1 https://github.com/HiroYokoyama/python_molecular_editor.git
              ../python_molecular_editor || true
 """
+
 import sys
 import os
 import types
@@ -23,6 +24,7 @@ from unittest.mock import MagicMock
 # ---------------------------------------------------------------------------
 # Stub heavy dependencies before importing the plugin
 # ---------------------------------------------------------------------------
+
 
 def _install_stubs():
     for mod_name in ["PyQt6", "PyQt6.QtCore", "PyQt6.QtWidgets", "PyQt6.QtGui"]:
@@ -45,12 +47,17 @@ _install_stubs()
 
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..")))
 
-from strain_homodesmotic_reaction_generator import initialize, PLUGIN_NAME, PLUGIN_VERSION
+from strain_homodesmotic_reaction_generator import (
+    initialize,
+    PLUGIN_NAME,
+    PLUGIN_VERSION,
+)
 
 
 # ---------------------------------------------------------------------------
 # Stub PluginContext
 # ---------------------------------------------------------------------------
+
 
 class _StubContext:
     def __init__(self):
@@ -64,22 +71,44 @@ class _StubContext:
         self._status_messages.append((msg, duration))
 
     # Full standard API stubs
-    def get_main_window(self): return MagicMock()
-    def add_menu_action(self, path, callback, **kwargs): pass
-    def register_save_handler(self, fn): pass
-    def register_load_handler(self, fn): pass
-    def register_document_reset_handler(self, fn): pass
-    def register_file_opener(self, ext, fn, priority=0): pass
-    def register_drop_handler(self, fn, priority=0): pass
-    def add_export_action(self, label, fn): pass
-    def add_toolbar_action(self, fn, text, icon=None, tooltip=None): pass
-    def register_window(self, key, win): pass
-    def get_window(self, key): return None
+    def get_main_window(self):
+        return MagicMock()
+
+    def add_menu_action(self, path, callback, **kwargs):
+        pass
+
+    def register_save_handler(self, fn):
+        pass
+
+    def register_load_handler(self, fn):
+        pass
+
+    def register_document_reset_handler(self, fn):
+        pass
+
+    def register_file_opener(self, ext, fn, priority=0):
+        pass
+
+    def register_drop_handler(self, fn, priority=0):
+        pass
+
+    def add_export_action(self, label, fn):
+        pass
+
+    def add_toolbar_action(self, fn, text, icon=None, tooltip=None):
+        pass
+
+    def register_window(self, key, win):
+        pass
+
+    def get_window(self, key):
+        return None
 
 
 # ---------------------------------------------------------------------------
 # Tests: metadata
 # ---------------------------------------------------------------------------
+
 
 class TestMetadata(unittest.TestCase):
     def test_plugin_name_contains_homodesmotic(self):
@@ -95,6 +124,7 @@ class TestMetadata(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Tests: initialize contract
 # ---------------------------------------------------------------------------
+
 
 class TestInitialize(unittest.TestCase):
     def setUp(self):
@@ -123,9 +153,11 @@ class TestInitialize(unittest.TestCase):
 class TestInitializeWithoutStatusMessage(unittest.TestCase):
     def test_works_without_show_status_message(self):
         """Context missing show_status_message must not crash initialize."""
+
         class _MinimalContext:
             def __init__(self):
                 self._analysis_tools = []
+
             def add_analysis_tool(self, label, callback):
                 self._analysis_tools.append((label, callback))
 
@@ -140,8 +172,14 @@ class TestInitializeWithoutStatusMessage(unittest.TestCase):
 
 _MAIN_APP_CANDIDATES = [
     os.path.normpath(
-        os.path.join(os.path.dirname(__file__), "..", "..",
-                     "python_molecular_editor", "moleditpy", "src")
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "python_molecular_editor",
+            "moleditpy",
+            "src",
+        )
     ),
     os.environ.get("CI_MAIN_APP_SRC", ""),
 ]
@@ -153,20 +191,22 @@ HAS_MAIN_APP = _MAIN_APP_SRC is not None
 
 try:
     import pytest
+
     _skipif = pytest.mark.skipif(
         not HAS_MAIN_APP,
         reason="main app not found; clone python_molecular_editor or set CI_MAIN_APP_SRC",
     )
 except ImportError:
+
     def _skipif(cls):
         return unittest.skip("pytest not available")(cls)
-
 
 
 def _clear_qt_stubs():
     """Remove fake PyQt6 stub modules so real PyQt6 can be imported by moleditpy."""
     to_remove = [
-        k for k in list(sys.modules)
+        k
+        for k in list(sys.modules)
         if k.startswith("PyQt6") and not hasattr(sys.modules[k], "__file__")
     ]
     for k in to_remove:
@@ -174,6 +214,7 @@ def _clear_qt_stubs():
     # Clear any moleditpy import that may have been attempted with stubs
     for k in [k for k in list(sys.modules) if k.startswith("moleditpy")]:
         del sys.modules[k]
+
 
 @_skipif
 class TestWithRealPluginContext(unittest.TestCase):
@@ -186,8 +227,13 @@ class TestWithRealPluginContext(unittest.TestCase):
         # Load plugin_interface.py directly to avoid triggering moleditpy/__init__.py
         # which imports PyQt6 and conflicts with PySide6 loaded by pytest-qt on Windows.
         import importlib.util as _ilu
-        _pi_path = os.path.join(_MAIN_APP_SRC, 'moleditpy', 'plugins', 'plugin_interface.py')
-        _spec = _ilu.spec_from_file_location('moleditpy.plugins.plugin_interface', _pi_path)
+
+        _pi_path = os.path.join(
+            _MAIN_APP_SRC, "moleditpy", "plugins", "plugin_interface.py"
+        )
+        _spec = _ilu.spec_from_file_location(
+            "moleditpy.plugins.plugin_interface", _pi_path
+        )
         _mod = _ilu.module_from_spec(_spec)
         _spec.loader.exec_module(_mod)
         cls.PluginContext = _mod.PluginContext

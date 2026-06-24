@@ -3,6 +3,7 @@ Unit tests for core.py helper functions not covered by test_analysis.py.
 Covers: atom_counts, count_groups, bond_counts helpers, SMILES coloring,
 format helpers, reaction-type color, internal search helpers, and scipy warning fix.
 """
+
 from collections import Counter
 from pathlib import Path
 import sys
@@ -46,6 +47,7 @@ pytestmark = pytest.mark.skipif(Chem is None, reason="RDKit not available")
 # atom_counts
 # ---------------------------------------------------------------------------
 
+
 def test_atom_counts_ethane_with_h():
     mol = Chem.AddHs(Chem.MolFromSmiles("CC"))
     assert atom_counts(mol) == Counter({"C": 2, "H": 6})
@@ -68,6 +70,7 @@ def test_atom_counts_without_explicit_h():
 # ---------------------------------------------------------------------------
 # count_groups
 # ---------------------------------------------------------------------------
+
 
 def test_count_groups_ethane_sp3_carbons():
     mol = Chem.MolFromSmiles("CC")
@@ -121,6 +124,7 @@ def test_count_groups_skips_hydrogen_atoms():
 # bond_counts
 # ---------------------------------------------------------------------------
 
+
 def test_bond_counts_ethane_single_cc_bond():
     mol = Chem.MolFromSmiles("CC")
     counts = bond_counts(mol)
@@ -142,12 +146,14 @@ def test_bond_counts_ethene_double_bond():
 
 def test_bond_counts_none_returns_empty():
     from strain_homodesmotic_reaction_generator.core import bond_counts
+
     assert bond_counts(None) == Counter()
 
 
 # ---------------------------------------------------------------------------
 # explicit_hydrogen_copy
 # ---------------------------------------------------------------------------
+
 
 def test_explicit_hydrogen_copy_adds_hydrogens():
     mol = Chem.MolFromSmiles("CC")
@@ -170,6 +176,7 @@ def test_explicit_hydrogen_copy_none_returns_none():
 # ---------------------------------------------------------------------------
 # unique_substructure_matches
 # ---------------------------------------------------------------------------
+
 
 def test_unique_substructure_matches_single_match():
     mol = Chem.MolFromSmiles("CC")
@@ -205,6 +212,7 @@ def test_unique_substructure_matches_invalid_smarts_returns_empty():
 # species_atom_counts
 # ---------------------------------------------------------------------------
 
+
 def test_species_atom_counts_ethane():
     result = species_atom_counts("CC")
     assert result == Counter({"C": 2, "H": 6})
@@ -223,6 +231,7 @@ def test_species_atom_counts_invalid_smiles():
 # ---------------------------------------------------------------------------
 # _span
 # ---------------------------------------------------------------------------
+
 
 def test_span_basic_html_structure():
     result = _span("C", "#ff0000")
@@ -244,12 +253,13 @@ def test_span_escapes_html_chars():
 
 def test_span_title_escapes_html():
     result = _span("N", "#0000ff", 'title with "quotes"')
-    assert '&quot;' in result or "quotes" not in result.split('title=')[1].split('"')[1]
+    assert "&quot;" in result or "quotes" not in result.split("title=")[1].split('"')[1]
 
 
 # ---------------------------------------------------------------------------
 # color_smiles_atoms_by_index
 # ---------------------------------------------------------------------------
+
 
 def test_color_smiles_atoms_all_default_color():
     result = color_smiles_atoms_by_index("CC", {}, "#ff0000", "test")
@@ -257,7 +267,9 @@ def test_color_smiles_atoms_all_default_color():
 
 
 def test_color_smiles_atoms_indexed_override():
-    result = color_smiles_atoms_by_index("CC", {0: ("#00ff00", "first")}, "#ff0000", "default")
+    result = color_smiles_atoms_by_index(
+        "CC", {0: ("#00ff00", "first")}, "#ff0000", "default"
+    )
     assert "#00ff00" in result
     assert "#ff0000" in result
 
@@ -282,6 +294,7 @@ def test_color_smiles_atoms_non_atom_chars_pass_through():
 # color_equation_term
 # ---------------------------------------------------------------------------
 
+
 def test_color_equation_term_formats_count_and_smiles():
     result = color_equation_term("2 CC", "#8ab4f8", "test")
     assert result.startswith("2 ")
@@ -298,6 +311,7 @@ def test_color_equation_term_no_space_is_smiles_only():
 # color_reference_term
 # ---------------------------------------------------------------------------
 
+
 def test_color_reference_term_includes_count_prefix():
     term = ReferenceTerm(3, "CC", (0, 1))
     result = color_reference_term(term, "#8ab4f8", "#81c995")
@@ -313,6 +327,7 @@ def test_color_reference_term_uses_core_map_for_propane():
 
 def test_color_reference_term_all_core_for_benzene():
     from strain_homodesmotic_reaction_generator.data import _BALANCE_CORE_MAP
+
     if "c1ccccc1" not in _BALANCE_CORE_MAP:
         pytest.skip("benzene not in balance core map")
     term = ReferenceTerm(1, "c1ccccc1", tuple(range(6)))
@@ -323,6 +338,7 @@ def test_color_reference_term_all_core_for_benzene():
 # ---------------------------------------------------------------------------
 # format_terms / format_reference_terms
 # ---------------------------------------------------------------------------
+
 
 def test_format_terms_empty_returns_none():
     assert format_terms([]) == "none"
@@ -338,7 +354,9 @@ def test_format_terms_with_positive_count():
 def test_format_terms_zero_count_excluded():
     terms = [BalanceTerm("ethane", "CC", 0), BalanceTerm("methane", "C", 1)]
     result = format_terms(terms)
-    assert "(ethane)" not in result  # term name in parens absent; "ethane" is substring of "methane"
+    assert (
+        "(ethane)" not in result
+    )  # term name in parens absent; "ethane" is substring of "methane"
     assert "1 C (methane)" in result
 
 
@@ -363,6 +381,7 @@ def test_format_reference_terms_zero_count_excluded():
 # ---------------------------------------------------------------------------
 # get_reaction_type_color
 # ---------------------------------------------------------------------------
+
 
 def test_get_reaction_type_color_hyperhomodesmotic():
     assert get_reaction_type_color("Hyperhomodesmotic") == "#81c995"
@@ -392,6 +411,7 @@ def test_get_reaction_type_color_unknown_returns_red():
 # _html_counter
 # ---------------------------------------------------------------------------
 
+
 def test_html_counter_empty_returns_none():
     assert _html_counter(Counter(), "#ff0000", "test") == "none"
 
@@ -413,6 +433,7 @@ def test_html_counter_sorted_alphabetically():
 # ---------------------------------------------------------------------------
 # Internal balance helpers
 # ---------------------------------------------------------------------------
+
 
 def test_counter_fits_exact_match():
     assert _counter_fits(Counter({"C": 2, "H": 6}), Counter({"C": 2, "H": 6}))
@@ -460,6 +481,7 @@ def test_counter_key_excludes_zero_and_negative():
 # build_hyperhomodesmotic_balance_terms
 # ---------------------------------------------------------------------------
 
+
 def test_build_hyperhomodesmotic_empty_delta_trivially_succeeds():
     left, right, success = build_hyperhomodesmotic_balance_terms(Counter())
     assert success is True
@@ -480,6 +502,7 @@ def test_build_hyperhomodesmotic_requires_scipy():
 # ---------------------------------------------------------------------------
 # Scipy warning fix: ui.py must import milp
 # ---------------------------------------------------------------------------
+
 
 def test_ui_module_imports_milp_for_warning_distinction():
     """ui.py must import milp so it can show the right warning when scipy IS installed
