@@ -1,7 +1,8 @@
-# Strain Homodesmotic Reaction Generator
+﻿# Strain Homodesmotic Reaction Generator
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20725908.svg)](https://doi.org/10.5281/zenodo.20725908)
 [![CI](https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/actions/workflows/ci.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/actions/workflows/ci.yml)
+[![Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/total)](https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/releases)
 
 This folder contains a MoleditPy plugin that detects common local bonding
 environments in strained or highly constrained molecules and proposes small
@@ -57,7 +58,7 @@ python -m pytest tests -v
 The tests require RDKit and PyTest. The GUI requires PyQt6. The MILP solver requires NumPy and SciPy.
 
 ## Reference
-[1] S. E. Wheeler, K. N. Houk, P. v. R. Schleyer, W. D. Allen, “A Hierarchy of Homodesmotic Reactions for Thermochemistry” *J. Am. Chem. Soc.* **2009**, *131*, 2547–2560.
+[1] S. E. Wheeler, K. N. Houk, P. v. R. Schleyer, W. D. Allen, 窶廣 Hierarchy of Homodesmotic Reactions for Thermochemistry窶・*J. Am. Chem. Soc.* **2009**, *131*, 2547窶・560.
 
 ## License & Disclaimer
 
