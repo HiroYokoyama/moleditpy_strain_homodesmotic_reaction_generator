@@ -2,8 +2,8 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20725908.svg)](https://doi.org/10.5281/zenodo.20725908)
 [![CI](https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/actions/workflows/ci.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/actions/workflows/ci.yml)
-[![Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/total)](https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/releases)
 ![Test Coverage](https://img.shields.io/badge/coverage->90%25-green)
+[![Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/total)](https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/releases)
 
 This folder contains a MoleditPy plugin that detects common local bonding
 environments in strained or highly constrained molecules and proposes small
