@@ -156,15 +156,65 @@ def count_groups(mol: Any) -> Counter[str]:
                     elif bond.GetBondType() == Chem.BondType.AROMATIC:
                         c_aromatic += 1
 
+            # Heteroatoms outside C/N/O used to leave no trace here, so a
+            # carbon bonded to Si, S, P or a halogen was indistinguishable
+            # from one bonded to nothing. Appended only when present, so keys
+            # for pure C/H/N/O molecules are unchanged.
+            other = _other_heteroatom_suffix(atom)
             if atom.GetIsAromatic():
                 counts[
-                    f"C_ar(H{h_count})(O_s{o_single})(O_d{o_double})(N_s{n_single})(N_d{n_double})(N_t{n_triple})(ar{c_aromatic})"
+                    f"C_ar(H{h_count})(O_s{o_single})(O_d{o_double})(N_s{n_single})(N_d{n_double})(N_t{n_triple})(ar{c_aromatic}){other}"
                 ] += 1
             else:
                 counts[
-                    f"C(H{h_count})(O_s{o_single})(O_d{o_double})(N_s{n_single})(N_d{n_double})(N_t{n_triple})(=C{c_double})(#C{c_triple})"
+                    f"C(H{h_count})(O_s{o_single})(O_d{o_double})(N_s{n_single})(N_d{n_double})(N_t{n_triple})(=C{c_double})(#C{c_triple}){other}"
                 ] += 1
+        else:
+            # Any other heavy atom (S, P, Si, B, Se, halogens, ...). Without
+            # this branch such atoms contributed no group at all, so the MILP
+            # could not see them: it balanced cyclopropane by adding
+            # tetramethylsilane, whose Si and carbons were both invisible.
+            h_count = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 1)
+            neighbours = _neighbour_signature(atom)
+            prefix = (
+                f"{atom.GetSymbol()}_ar" if atom.GetIsAromatic() else atom.GetSymbol()
+            )
+            counts[f"{prefix}(H{h_count}){neighbours}"] += 1
     return counts
+
+
+#: Elements whose bonding is spelled out explicitly in the carbon descriptor.
+_DESCRIBED_ELEMENTS = frozenset({1, 6, 7, 8})
+
+
+def _bond_symbol(bond: Any) -> str:
+    if bond.GetBondType() == Chem.BondType.DOUBLE:
+        return "="
+    if bond.GetBondType() == Chem.BondType.TRIPLE:
+        return "#"
+    if bond.GetBondType() == Chem.BondType.AROMATIC:
+        return ":"
+    return "-"
+
+
+def _neighbour_signature(atom: Any) -> str:
+    """Sorted (bond order, element) list of an atom's heavy neighbours."""
+    parts = sorted(
+        f"{_bond_symbol(bond)}{bond.GetOtherAtom(atom).GetSymbol()}"
+        for bond in atom.GetBonds()
+        if bond.GetOtherAtom(atom).GetAtomicNum() != 1
+    )
+    return "(" + ",".join(parts) + ")" if parts else "()"
+
+
+def _other_heteroatom_suffix(atom: Any) -> str:
+    """Descriptor for neighbours outside C/H/N/O; empty when there are none."""
+    parts = sorted(
+        f"{_bond_symbol(bond)}{bond.GetOtherAtom(atom).GetSymbol()}"
+        for bond in atom.GetBonds()
+        if bond.GetOtherAtom(atom).GetAtomicNum() not in _DESCRIBED_ELEMENTS
+    )
+    return "(X:" + ",".join(parts) + ")" if parts else ""
 
 
 def get_atom_state(atom: Any) -> str:
@@ -448,7 +498,7 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
 
     if milp is not None and np is not None:
         left_balance_terms, right_balance_terms, milp_success = (
-            build_hyperhomodesmotic_balance_terms(group_delta)
+            build_hyperhomodesmotic_balance_terms(group_delta, atom_delta)
         )
 
     if not milp_success:
@@ -765,8 +815,17 @@ def _search_balance(
 
 def build_hyperhomodesmotic_balance_terms(
     group_delta: Counter[str],
+    atom_delta: Counter[str] | None = None,
 ) -> tuple[tuple[BalanceTerm, ...], tuple[BalanceTerm, ...], bool]:
-    """Solve for a perfectly balanced hyperhomodesmotic reaction using MILP."""
+    """Solve for a perfectly balanced hyperhomodesmotic reaction using MILP.
+
+    *atom_delta* is the per-element shortfall the balance species must make
+    up (reference atoms minus target atoms). Constraining it explicitly is
+    what stops the solver introducing an element that appears nowhere in the
+    reaction: group descriptors alone cannot express "conserve silicon", so
+    without this the solver was free to balance cyclopropane by adding
+    tetramethylsilane to one side.
+    """
     if not group_delta:
         return (), (), True
 
@@ -774,27 +833,38 @@ def build_hyperhomodesmotic_balance_terms(
     for species in BALANCE_SPECIES:
         mol = Chem.MolFromSmiles(species.smiles)
         if mol is not None:
-            species_list.append((species, count_groups(mol)))
+            species_list.append(
+                (species, count_groups(mol), species_atom_counts(species.smiles))
+            )
 
     if not species_list:
         return (), (), False
 
     group_names = sorted(
-        set(k for _, c in species_list for k in c.keys()) | set(group_delta.keys())
+        set(k for _, c, _ in species_list for k in c.keys()) | set(group_delta.keys())
+    )
+    atom_delta = Counter(atom_delta or {})
+    element_names = sorted(
+        set(e for _, _, a in species_list for e in a.keys()) | set(atom_delta.keys())
     )
     n_groups = len(group_names)
     n_species = len(species_list)
 
-    A = np.zeros((n_groups, n_species))
-    for j, (_, c) in enumerate(species_list):
+    A = np.zeros((n_groups + len(element_names), n_species))
+    for j, (_, c, a) in enumerate(species_list):
         for i, name in enumerate(group_names):
             A[i, j] = c[name]
+        for i, element in enumerate(element_names):
+            A[n_groups + i, j] = a[element]
 
     A_eq = np.hstack((A, -A))
-    b_eq = np.array([group_delta.get(name, 0) for name in group_names])
+    b_eq = np.array(
+        [group_delta.get(name, 0) for name in group_names]
+        + [atom_delta.get(element, 0) for element in element_names]
+    )
 
     c = np.ones(2 * n_species)
-    for j, (species, _) in enumerate(species_list):
+    for j, (species, _groups, _atoms) in enumerate(species_list):
         heavy = sum(1 for char in species.smiles if char.isalpha() and char != "H")
         cost = 1.0
         if heavy == 1:
