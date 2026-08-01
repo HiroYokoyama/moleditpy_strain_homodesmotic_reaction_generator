@@ -12,6 +12,7 @@ reference molecules for draft homodesmotic or isodesmic reaction balancing.
 Repo: [https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/](https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/)
 
 ![](img/main.png)
+[![GitHub tag](https://img.shields.io/github/v/tag/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator?label=version)](https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_generator/tags)
 
 ## Features
 
