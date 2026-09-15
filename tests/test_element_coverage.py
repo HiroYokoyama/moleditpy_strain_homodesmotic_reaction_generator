@@ -217,7 +217,7 @@ class TestNoPhantomElements(unittest.TestCase):
     def test_element_constraint_rejects_an_impossible_balance(self):
         """A silicon shortfall with no silicon species available is infeasible
         rather than being silently absorbed into the group constraints."""
-        left, right, ok = core.build_hyperhomodesmotic_balance_terms(
+        left, right, ok, unmet = core.build_hyperhomodesmotic_balance_terms(
             Counter(), Counter({"Si": 1})
         )
         # Empty group delta short-circuits to the trivial solution.

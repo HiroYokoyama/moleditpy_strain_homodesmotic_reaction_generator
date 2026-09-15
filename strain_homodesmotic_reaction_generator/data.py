@@ -26,6 +26,26 @@ class BalanceSpecies:
     description: str
 
 
+@dataclass(frozen=True)
+class UserSpecies:
+    """A balance species typed by the user.
+
+    ``smiles`` is kept verbatim so reports quote what was entered rather than
+    RDKit's canonical form. ``required`` forces the solver to use it.
+    """
+
+    smiles: str
+    name: str = ""
+    required: bool = False
+
+    def as_balance_species(self) -> "BalanceSpecies":
+        return BalanceSpecies(
+            self.name or self.smiles,
+            self.smiles,
+            "User-defined species",
+        )
+
+
 ENVIRONMENTS: tuple[EnvironmentRule, ...] = (
     EnvironmentRule(
         "primary carbon - primary carbon",

@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import csv
 import html
+import itertools
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping, Sequence
 
 try:
     from rdkit import Chem
@@ -23,9 +24,10 @@ except ImportError:  # pragma: no cover
 
 try:
     import numpy as np
-    from scipy.optimize import LinearConstraint, milp
+    from scipy.optimize import Bounds, LinearConstraint, milp
 except ImportError:
     np = None
+    Bounds = None
     LinearConstraint = None
     milp = None
 
@@ -33,6 +35,7 @@ except ImportError:
 from .data import (
     EnvironmentRule,
     BalanceSpecies,
+    UserSpecies,
     ENVIRONMENTS,
     BALANCE_SPECIES,
     _BALANCE_CORE_MAP,
@@ -46,6 +49,7 @@ class EnvironmentMatch:
     reference_smiles: str
     description: str
     original_atom_indices: tuple[int, ...]
+    user_defined: bool = False
 
 
 @dataclass(frozen=True)
@@ -53,6 +57,7 @@ class ReferenceTerm:
     count: int
     smiles: str
     original_atom_indices: tuple[int, ...]
+    user_defined: bool = False
 
 
 @dataclass(frozen=True)
@@ -61,6 +66,7 @@ class BalanceTerm:
     smiles: str
     count: int
     description: str = ""
+    user_defined: bool = False
 
 
 @dataclass(frozen=True)
@@ -82,6 +88,10 @@ class AnalysisResult:
     reaction_type: str
     lhs_bonds: Counter[str]
     rhs_bonds: Counter[str]
+    reference_overrides: tuple[tuple[str, str], ...] = ()
+    user_species: tuple[UserSpecies, ...] = ()
+    unmet_required: tuple[str, ...] = ()
+    cancelled_references: tuple[str, ...] = ()
 
 
 def _require_rdkit() -> None:
@@ -418,8 +428,20 @@ def unique_substructure_matches(
     return {tuple(sorted(match)) for match in matches}
 
 
-def analyze_molecule(mol: Any) -> AnalysisResult:
-    """Analyze a molecule and create a draft homodesmotic equation."""
+def analyze_molecule(
+    mol: Any,
+    reference_overrides: Mapping[str, str] | None = None,
+    user_species: Sequence[UserSpecies] | None = None,
+) -> AnalysisResult:
+    """Analyze a molecule and create a draft homodesmotic equation.
+
+    *reference_overrides* maps an environment name to a replacement reference
+    SMILES; *user_species* extends the balance library. Both are stored on the
+    result verbatim so the report quotes what was typed. The reaction type is
+    re-derived from the resulting equation either way, so a substituted
+    reference that breaks the balance is reported as broken rather than
+    accepted.
+    """
     _require_rdkit()
     if mol is None or mol.GetNumAtoms() == 0:
         return AnalysisResult(
@@ -442,6 +464,15 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
             Counter(),
         )
 
+    overrides = {
+        name: smiles.strip()
+        for name, smiles in (reference_overrides or {}).items()
+        if smiles and smiles.strip() and is_valid_smiles(smiles)
+    }
+    kept_species, _rejected = normalize_user_species(user_species)
+    extra_species = tuple(entry.as_balance_species() for entry in kept_species)
+    required_smiles = tuple(entry.smiles for entry in kept_species if entry.required)
+
     target_smiles = Chem.MolToSmiles(Chem.RemoveHs(mol), isomericSmiles=True)
     target_atoms = atom_counts(explicit_hydrogen_copy(mol))
     target_groups = count_groups(mol)
@@ -455,24 +486,35 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         if count == 0:
             continue
 
+        ref_smiles = overrides.get(rule.name, rule.reference_smiles)
+        overridden = ref_smiles != rule.reference_smiles
+        core_indices = reference_original_atom_indices(rule, ref_smiles)
+        description = (
+            f"User-specified reference (default: {rule.reference_smiles})."
+            if overridden
+            else rule.description
+        )
+
         matches.append(
             EnvironmentMatch(
                 rule.name,
                 count,
-                rule.reference_smiles,
-                rule.description,
-                reference_original_atom_indices(rule),
+                ref_smiles,
+                description,
+                core_indices,
+                user_defined=overridden,
             )
         )
         rhs_terms.append(
             ReferenceTerm(
                 count,
-                rule.reference_smiles,
-                reference_original_atom_indices(rule),
+                ref_smiles,
+                core_indices,
+                user_defined=overridden,
             )
         )
 
-        ref_mol = Chem.MolFromSmiles(rule.reference_smiles)
+        ref_mol = Chem.MolFromSmiles(ref_smiles)
         if ref_mol is None:
             continue
         for element, number in atom_counts(explicit_hydrogen_copy(ref_mol)).items():
@@ -496,9 +538,13 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
     unresolved_left_atoms, unresolved_right_atoms = Counter(), Counter()
     milp_success = False
 
+    unmet_required: tuple[str, ...] = ()
+
     if milp is not None and np is not None:
-        left_balance_terms, right_balance_terms, milp_success = (
-            build_hyperhomodesmotic_balance_terms(group_delta, atom_delta)
+        left_balance_terms, right_balance_terms, milp_success, unmet_required = (
+            build_hyperhomodesmotic_balance_terms(
+                group_delta, atom_delta, extra_species, required_smiles
+            )
         )
 
     if not milp_success:
@@ -508,8 +554,17 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         right_needed = Counter(
             {element: -count for element, count in atom_delta.items() if count < 0}
         )
-        left_balance_terms, unresolved_left_atoms = build_balance_terms(left_needed)
-        right_balance_terms, unresolved_right_atoms = build_balance_terms(right_needed)
+        left_balance_terms, unresolved_left_atoms, unmet_left = build_balance_terms(
+            left_needed, extra_species, required_smiles
+        )
+        right_balance_terms, unresolved_right_atoms, unmet_right = build_balance_terms(
+            right_needed, extra_species, required_smiles
+        )
+        # A required species only has to land on one side, so it counts as
+        # unmet only when neither side could take it.
+        unmet_required = tuple(
+            smiles for smiles in unmet_left if smiles in set(unmet_right)
+        )
 
     # Algebraic cancellation of identical reference molecules on both sides
     lhs_counts = Counter()
@@ -541,6 +596,7 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
                 smiles=term.smiles,
                 count=new_count,
                 description=term.description,
+                user_defined=term.user_defined,
             )
         )
 
@@ -560,6 +616,7 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
                 smiles=term.smiles,
                 count=new_count,
                 description=term.description,
+                user_defined=term.user_defined,
             )
         )
 
@@ -578,6 +635,7 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
                 count=new_count,
                 smiles=rhs_term.smiles,
                 original_atom_indices=rhs_term.original_atom_indices,
+                user_defined=rhs_term.user_defined,
             )
         )
         new_matches.append(
@@ -587,8 +645,18 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
                 reference_smiles=match.reference_smiles,
                 description=match.description,
                 original_atom_indices=match.original_atom_indices,
+                user_defined=match.user_defined,
             )
         )
+
+    # A reference the solver had to put on both sides cancels to nothing. The
+    # remaining equation can still be perfectly balanced while no longer saying
+    # anything about the environment it was built to measure, so name it.
+    cancelled_references = tuple(
+        before.name
+        for before, after in zip(matches, new_matches)
+        if before.count > 0 and after.count == 0
+    )
 
     left_balance_terms = tuple(new_left_balance_terms)
     right_balance_terms = tuple(new_right_balance_terms)
@@ -652,6 +720,13 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         unresolved_right_atoms,
     )
 
+    user_input_lines = describe_user_input(
+        tuple(sorted(overrides.items())),
+        kept_species,
+        unmet_required,
+        cancelled_references,
+    )
+
     equation_text = build_equation_text(
         target_smiles,
         target_atoms,
@@ -667,6 +742,7 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         reaction_type,
         lhs_bonds,
         rhs_bonds,
+        user_input_lines,
     )
     equation_html = build_equation_html(
         target_smiles,
@@ -684,6 +760,7 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         reaction_type,
         lhs_bonds,
         rhs_bonds,
+        user_input_lines,
     )
     return AnalysisResult(
         target_smiles,
@@ -703,6 +780,10 @@ def analyze_molecule(mol: Any) -> AnalysisResult:
         reaction_type,
         lhs_bonds,
         rhs_bonds,
+        tuple(sorted(overrides.items())),
+        kept_species,
+        unmet_required,
+        cancelled_references,
     )
 
 
@@ -714,10 +795,49 @@ def species_atom_counts(smiles: str) -> Counter[str]:
     return atom_counts(explicit_hydrogen_copy(mol))
 
 
-def reference_original_atom_indices(rule: EnvironmentRule) -> tuple[int, ...]:
+def is_valid_smiles(smiles: str) -> bool:
+    """Return True when RDKit can parse *smiles*."""
+    if Chem is None or not smiles or not smiles.strip():
+        return False
+    return Chem.MolFromSmiles(smiles.strip()) is not None
+
+
+def normalize_user_species(
+    entries: Sequence[UserSpecies] | None,
+) -> tuple[tuple[UserSpecies, ...], tuple[str, ...]]:
+    """Split user entries into parseable ones and the SMILES that failed.
+
+    Duplicated SMILES collapse onto the first entry, keeping ``required`` if any
+    copy asked for it, so the solver never gets two identical columns.
+    """
+    kept: list[UserSpecies] = []
+    rejected: list[str] = []
+    seen: dict[str, int] = {}
+    for entry in entries or ():
+        smiles = entry.smiles.strip()
+        if not smiles:
+            continue
+        if not is_valid_smiles(smiles):
+            rejected.append(entry.smiles)
+            continue
+        if smiles in seen:
+            index = seen[smiles]
+            if entry.required and not kept[index].required:
+                kept[index] = UserSpecies(kept[index].smiles, kept[index].name, True)
+            continue
+        seen[smiles] = len(kept)
+        kept.append(UserSpecies(smiles, entry.name.strip(), entry.required))
+    return tuple(kept), tuple(rejected)
+
+
+def reference_original_atom_indices(
+    rule: EnvironmentRule, reference_smiles: str | None = None
+) -> tuple[int, ...]:
     """Return reference atoms that correspond to the original matched environment."""
     _require_rdkit()
-    ref_mol = Chem.MolFromSmiles(rule.reference_smiles)
+    ref_mol = Chem.MolFromSmiles(
+        rule.reference_smiles if reference_smiles is None else reference_smiles
+    )
     pattern = Chem.MolFromSmarts(rule.smarts)
     if ref_mol is None or pattern is None:
         return ()
@@ -813,10 +933,31 @@ def _search_balance(
     return search(_counter_key(needed_atoms), 0)
 
 
+def balance_pool(
+    extra_species: Sequence[BalanceSpecies] = (),
+) -> tuple[tuple[BalanceSpecies, ...], frozenset[str]]:
+    """Built-in species plus the user's, and the SMILES the user contributed.
+
+    A user entry whose SMILES already exists in the library reuses that entry
+    instead of adding a duplicate column, but is still reported as theirs.
+    """
+    pool = list(BALANCE_SPECIES)
+    known = {species.smiles for species in pool}
+    user_smiles = set()
+    for species in extra_species:
+        user_smiles.add(species.smiles)
+        if species.smiles not in known:
+            known.add(species.smiles)
+            pool.append(species)
+    return tuple(pool), frozenset(user_smiles)
+
+
 def build_hyperhomodesmotic_balance_terms(
     group_delta: Counter[str],
     atom_delta: Counter[str] | None = None,
-) -> tuple[tuple[BalanceTerm, ...], tuple[BalanceTerm, ...], bool]:
+    extra_species: Sequence[BalanceSpecies] = (),
+    required_smiles: Sequence[str] = (),
+) -> tuple[tuple[BalanceTerm, ...], tuple[BalanceTerm, ...], bool, tuple[str, ...]]:
     """Solve for a perfectly balanced hyperhomodesmotic reaction using MILP.
 
     *atom_delta* is the per-element shortfall the balance species must make
@@ -826,11 +967,14 @@ def build_hyperhomodesmotic_balance_terms(
     without this the solver was free to balance cyclopropane by adding
     tetramethylsilane to one side.
     """
-    if not group_delta:
-        return (), (), True
+    pool, user_smiles = balance_pool(extra_species)
+    required = {smiles for smiles in required_smiles if smiles}
+
+    if not group_delta and not required:
+        return (), (), True, ()
 
     species_list = []
-    for species in BALANCE_SPECIES:
+    for species in pool:
         mol = Chem.MolFromSmiles(species.smiles)
         if mol is not None:
             species_list.append(
@@ -838,7 +982,7 @@ def build_hyperhomodesmotic_balance_terms(
             )
 
     if not species_list:
-        return (), (), False
+        return (), (), False, tuple(required)
 
     group_names = sorted(
         set(k for _, c, _ in species_list for k in c.keys()) | set(group_delta.keys())
@@ -875,15 +1019,29 @@ def build_hyperhomodesmotic_balance_terms(
         c[n_species + j] = cost
 
     integrality = np.ones(2 * n_species)
+    constraints = [LinearConstraint(A_eq, b_eq, b_eq)]
 
-    try:
-        res = milp(
-            c=c, constraints=LinearConstraint(A_eq, b_eq, b_eq), integrality=integrality
-        )
-        if not res.success:
-            return (), (), False
-    except Exception:
-        return (), (), False
+    required_rows = [
+        j
+        for j, (species, _g, _a) in enumerate(species_list)
+        if species.smiles in required
+    ]
+    unplaceable = tuple(
+        smiles
+        for smiles in required
+        if smiles not in {species.smiles for species, _g, _a in species_list}
+    )
+
+    res = _solve_with_required(c, constraints, integrality, n_species, required_rows)
+    unmet: tuple[str, ...] = unplaceable
+    if res is None and required_rows:
+        # The requirement is what made it infeasible. A good balance the user
+        # cannot have is still worth more than no balance at all, so drop the
+        # requirement and say so rather than falling back to elemental mode.
+        res = _solve_with_required(c, constraints, integrality, n_species, [])
+        unmet = unplaceable + tuple(species_list[j][0].smiles for j in required_rows)
+    if res is None:
+        return (), (), False, unplaceable
 
     u = np.round(res.x[:n_species]).astype(int)
     v = np.round(res.x[n_species:]).astype(int)
@@ -898,6 +1056,7 @@ def build_hyperhomodesmotic_balance_terms(
                     species.smiles,
                     int(count),
                     description=species.description,
+                    user_defined=species.smiles in user_smiles,
                 )
             )
 
@@ -911,22 +1070,101 @@ def build_hyperhomodesmotic_balance_terms(
                     species.smiles,
                     int(count),
                     description=species.description,
+                    user_defined=species.smiles in user_smiles,
                 )
             )
 
-    return tuple(left_terms), tuple(right_terms), True
+    return tuple(left_terms), tuple(right_terms), True, unmet
+
+
+#: Sides to try per required species is 2**k; past this the search is skipped
+#: and the species is reported as unmet instead of stalling the dialog.
+_MAX_REQUIRED_SEARCH = 6
+
+
+def _solve_with_required(
+    c: Any,
+    constraints: list,
+    integrality: Any,
+    n_species: int,
+    required_rows: Sequence[int],
+) -> Any:
+    """Cheapest MILP solution, pinning each required species to one side.
+
+    Asking only for "present somewhere" lets the solver put a species on both
+    sides, where it cancels out and the user sees no trace of it. Pinning each
+    required species to a single side and zeroing the other is what makes the
+    requirement mean something.
+    """
+
+    def solve(bounds: Any) -> Any:
+        try:
+            res = milp(
+                c=c,
+                constraints=constraints,
+                integrality=integrality,
+                bounds=bounds,
+            )
+        except Exception:
+            return None
+        return res if res.success else None
+
+    if not required_rows:
+        return solve(None)
+    if len(required_rows) > _MAX_REQUIRED_SEARCH:
+        return None
+
+    best = None
+    for sides in itertools.product((0, 1), repeat=len(required_rows)):
+        lb = np.zeros(2 * n_species)
+        ub = np.full(2 * n_species, np.inf)
+        for side, j in zip(sides, required_rows):
+            present, absent = (j, n_species + j) if side == 0 else (n_species + j, j)
+            lb[present] = 1
+            ub[absent] = 0
+        res = solve(Bounds(lb, ub))
+        if res is not None and (best is None or res.fun < best.fun):
+            best = res
+    return best
 
 
 def build_balance_terms(
     needed_atoms: Counter[str],
-) -> tuple[tuple[BalanceTerm, ...], Counter[str]]:
-    """Build simple molecule terms that exactly cover the requested atom counts."""
-    if not needed_atoms:
-        return (), Counter()
+    extra_species: Sequence[BalanceSpecies] = (),
+    required_smiles: Sequence[str] = (),
+) -> tuple[tuple[BalanceTerm, ...], Counter[str], tuple[str, ...]]:
+    """Build simple molecule terms that exactly cover the requested atom counts.
 
-    allowed_elements = set(needed_atoms)
+    Returns the terms, any atoms left over, and the required SMILES that could
+    not be placed on this side.
+    """
+    pool, user_smiles = balance_pool(extra_species)
+
+    # Seed one copy of each required species before searching. This side only
+    # has to absorb a specific shortfall, so a species the shortfall cannot
+    # afford belongs on the other side, not here.
+    remaining = Counter(needed_atoms)
+    seeded: Counter[BalanceSpecies] = Counter()
+    unmet: list[str] = []
+    by_smiles = {species.smiles: species for species in pool}
+    for smiles in required_smiles:
+        species = by_smiles.get(smiles)
+        if species is None:
+            unmet.append(smiles)
+            continue
+        counts = species_atom_counts(smiles)
+        if counts and _counter_fits(counts, remaining):
+            remaining = _subtract_counter(remaining, counts)
+            seeded[species] += 1
+        else:
+            unmet.append(smiles)
+
+    if not remaining:
+        return _balance_terms_from(seeded, user_smiles), Counter(), tuple(unmet)
+
+    allowed_elements = set(remaining)
     candidates: list[tuple[BalanceSpecies, Counter[str]]] = []
-    for species in BALANCE_SPECIES:
+    for species in pool:
         counts = species_atom_counts(species.smiles)
         if counts and set(counts).issubset(allowed_elements):
             candidates.append((species, counts))
@@ -940,18 +1178,57 @@ def build_balance_terms(
     )
 
     candidate_tuple = tuple(candidates)
-    solution = _search_balance(needed_atoms, candidate_tuple)
+    solution = _search_balance(remaining, candidate_tuple)
     if solution is None:
-        return (), Counter(needed_atoms)
+        return (
+            _balance_terms_from(seeded, user_smiles),
+            Counter(remaining),
+            tuple(unmet),
+        )
 
-    grouped = Counter(candidate_tuple[index][0] for index in solution)
-    terms = tuple(
+    grouped = Counter(seeded)
+    grouped.update(candidate_tuple[index][0] for index in solution)
+    return _balance_terms_from(grouped, user_smiles), Counter(), tuple(unmet)
+
+
+def _balance_terms_from(
+    grouped: Counter[BalanceSpecies], user_smiles: frozenset[str]
+) -> tuple[BalanceTerm, ...]:
+    return tuple(
         BalanceTerm(
-            species.name, species.smiles, count, description=species.description
+            species.name,
+            species.smiles,
+            count,
+            description=species.description,
+            user_defined=species.smiles in user_smiles,
         )
         for species, count in sorted(grouped.items(), key=lambda item: item[0].name)
+        if count > 0
     )
-    return terms, Counter()
+
+
+def describe_user_input(
+    reference_overrides: tuple[tuple[str, str], ...],
+    user_species: Sequence[UserSpecies],
+    unmet_required: Sequence[str] = (),
+    cancelled_references: Sequence[str] = (),
+) -> tuple[str, ...]:
+    """One line per user entry, quoting the SMILES exactly as it was typed."""
+    lines: list[str] = []
+    for name, smiles in reference_overrides:
+        lines.append(f"Reference override - {name}: {smiles}")
+    for entry in user_species:
+        label = f" ({entry.name})" if entry.name else ""
+        suffix = " [required]" if entry.required else ""
+        lines.append(f"User species - {entry.smiles}{label}{suffix}")
+    for smiles in unmet_required:
+        lines.append(f"Required species could not be placed: {smiles}")
+    for name in cancelled_references:
+        lines.append(
+            f"Reference for '{name}' cancelled out; the equation no longer "
+            "covers that environment"
+        )
+    return tuple(lines)
 
 
 def format_counter(values: Counter[str]) -> str:
@@ -975,6 +1252,7 @@ def build_equation_text(
     reaction_type: str,
     lhs_bonds: Counter[str] | None = None,
     rhs_bonds: Counter[str] | None = None,
+    user_input_lines: Sequence[str] = (),
 ) -> str:
     if lhs_bonds is None:
         lhs_bonds = Counter()
@@ -1015,10 +1293,17 @@ def build_equation_text(
         "\n".join(bond_status_lines) if bond_status_lines else "  - No bonds detected"
     )
 
+    user_input_text = (
+        "\n".join(f"  - {line}" for line in user_input_lines)
+        if user_input_lines
+        else "  - none (all species are the built-in defaults)"
+    )
+
     return (
         "Homodesmotic Draft Equation\n"
         "===========================\n\n"
         f"{lhs} -> {rhs}\n\n"
+        f"User-specified input:\n{user_input_text}\n\n"
         f"Reaction type: {reaction_type}\n"
         f"Hyperhomodesmotic condition: {hyper_status}\n"
         f"Bond-type conservation status:\n{bond_status_text}\n\n"
@@ -1050,14 +1335,26 @@ def build_equation_text(
 
 def format_terms(terms: Iterable[BalanceTerm]) -> str:
     parts = [
-        f"{term.count} {term.smiles} ({term.name})" for term in terms if term.count > 0
+        f"{term.count} {term.smiles} ({term.name})"
+        + (" [user]" if term.user_defined else "")
+        for term in terms
+        if term.count > 0
     ]
     return " + ".join(parts) if parts else "none"
 
 
 def format_reference_terms(terms: Iterable[ReferenceTerm]) -> str:
-    parts = [f"{term.count} {term.smiles}" for term in terms if term.count > 0]
+    parts = [
+        f"{term.count} {term.smiles}" + (" [user]" if term.user_defined else "")
+        for term in terms
+        if term.count > 0
+    ]
     return " + ".join(parts) if parts else "no reference molecules detected"
+
+
+#: Everything the user typed is drawn in one colour so it stands out from the
+#: automatically chosen species.
+USER_COLOR = "#ff8a65"
 
 
 def _span(text: str, color: str, title: str = "") -> str:
@@ -1138,6 +1435,12 @@ def color_reference_term(
     original_color: str,
     added_color: str,
 ) -> str:
+    if term.user_defined:
+        smiles = color_smiles_atoms(
+            term.smiles, USER_COLOR, "User-specified reference molecule"
+        )
+        return f"{term.count} {smiles}"
+
     """Color atom tokens of a reference fragment.
 
     True core atoms are colored with original_color (blue), while any capping
@@ -1187,6 +1490,16 @@ def _html_terms(
     parts = []
     for term in terms:
         if term.count > 0:
+            if term.user_defined:
+                parts.append(
+                    f"{term.count} "
+                    + color_smiles_atoms(
+                        term.smiles, USER_COLOR, "User-specified species"
+                    )
+                    + f' <span style="color:#9aa0a6;">({html.escape(term.name)}, '
+                    "user)</span>"
+                )
+                continue
             core_indices = _BALANCE_CORE_MAP.get(term.smiles, ())
             indexed_colors = {
                 idx: (core_color, "Balance species core environment atom")
@@ -1233,6 +1546,7 @@ def build_equation_html(
     reaction_type: str = "Unbalanced",
     lhs_bonds: Counter[str] | None = None,
     rhs_bonds: Counter[str] | None = None,
+    user_input_lines: Sequence[str] = (),
 ) -> str:
     """Build a styled HTML representation of the homodesmotic equation.
 
@@ -1298,6 +1612,19 @@ def build_equation_html(
             f"{_span('unresolved right species', unresolved_color)} ({unresolved_right})"
         )
 
+    if user_input_lines:
+        user_input_html = (
+            '<ul style="margin:4px 0 0 16px; padding:0; list-style-type:disc;'
+            f' color:{USER_COLOR};">'
+            + "".join(f"<li>{html.escape(line)}</li>" for line in user_input_lines)
+            + "</ul>"
+        )
+    else:
+        user_input_html = (
+            '<p style="margin:4px 0 0 16px; color:#9aa0a6;">'
+            "none (all species are the built-in defaults)</p>"
+        )
+
     warning_html = ""
     if is_elemental_balance:
         warning_html = '<p style="color:#fde293; font-weight:bold;">⚠️ Note: Calculated in elemental balance mode due to environment matching constraints.</p>'
@@ -1338,6 +1665,8 @@ def build_equation_html(
         f'<p style="font-size:16px; font-weight:500; line-height:1.6; margin:16px 0;">{" + ".join(lhs_parts)} '
         f'<span style="color:#e8eaed;">-&gt;</span> {" + ".join(rhs_parts)}</p>'
         '<hr style="border:0; border-top:1px solid #3c4043;">'
+        f'<div style="margin-bottom:12px;"><span style="color:#9aa0a6;">'
+        f"User-specified input:</span>{user_input_html}</div>"
         f'<p><span style="color:#9aa0a6;">Reaction Type:</span> '
         f'<span style="color:{get_reaction_type_color(reaction_type)}; font-weight:bold;">{reaction_type}</span></p>'
         f'<p><span style="color:#9aa0a6;">Hyperhomodesmotic condition:</span> {hyper_status_html}</p>'
@@ -1363,11 +1692,34 @@ def build_equation_html(
         '<p style="color:#9aa0a6;">Blue = original target and reference cores, '
         "yellow = balancing cores to adjust over-counted bonds, "
         "green = automatically added left balance species and caps, "
-        "purple = automatically added right balance species, red = unresolved.</p>"
+        "purple = automatically added right balance species, "
+        f'<span style="color:{USER_COLOR};">orange = user-specified</span>, '
+        "red = unresolved.</p>"
         '<p style="color:#9aa0a6; font-size:12px; margin-top:8px;">'
         "Note: Common balancing species and reference molecules appearing on both sides "
         "of the equation have been algebraically cancelled to prevent redundant reference calculations.</p>"
         "</div>"
+    )
+
+
+def _user_input_card(result: AnalysisResult) -> str:
+    """HTML card quoting the user's overrides and species as they were typed."""
+    lines = describe_user_input(
+        result.reference_overrides,
+        result.user_species,
+        result.unmet_required,
+        result.cancelled_references,
+    )
+    if not lines:
+        return ""
+    items = "".join(f"<li>{html.escape(line)}</li>" for line in lines)
+    return (
+        '        <div class="card" style="padding-top: 20px;">\n'
+        '            <h3 style="margin: 0 0 12px 0; font-size: 18px; '
+        'font-weight: 500;">User-specified input</h3>\n'
+        f'            <ul style="margin:0 0 0 18px; padding:0; color:{USER_COLOR};">'
+        f"{items}</ul>\n"
+        "        </div>\n"
     )
 
 
@@ -1549,8 +1901,7 @@ def export_analysis(
             )
             + "\n                </tbody>\n"
             "            </table>\n"
-            "        </div>\n"
-            "    </div>\n"
+            "        </div>\n" + _user_input_card(result) + "    </div>\n"
             "</body>\n"
             "</html>\n",
             encoding="utf-8",
@@ -1628,6 +1979,19 @@ def export_analysis(
                 format_counter(result.unresolved_right_atoms),
             ]
         )
+        writer.writerow([])
+        writer.writerow(["User-specified input"])
+        lines = describe_user_input(
+            result.reference_overrides,
+            result.user_species,
+            result.unmet_required,
+            result.cancelled_references,
+        )
+        if lines:
+            for line in lines:
+                writer.writerow([line])
+        else:
+            writer.writerow(["none (all species are the built-in defaults)"])
         writer.writerow([])
         writer.writerow(["Equation"])
         writer.writerow([result.equation_text])

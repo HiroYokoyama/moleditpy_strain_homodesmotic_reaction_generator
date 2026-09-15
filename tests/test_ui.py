@@ -150,7 +150,7 @@ def test_dialog_refresh_analysis_success_populates_table():
 def test_dialog_refresh_analysis_error_shows_message_box(monkeypatch):
     ui._QMessageBox_calls = []
 
-    def _boom(mol):
+    def _boom(mol, *args, **kwargs):
         raise RuntimeError("kaboom")
 
     monkeypatch.setattr(ui, "analyze_molecule", _boom)

@@ -483,7 +483,7 @@ def test_counter_key_excludes_zero_and_negative():
 
 
 def test_build_hyperhomodesmotic_empty_delta_trivially_succeeds():
-    left, right, success = build_hyperhomodesmotic_balance_terms(Counter())
+    left, right, success, unmet = build_hyperhomodesmotic_balance_terms(Counter())
     assert success is True
     assert left == ()
     assert right == ()
@@ -493,7 +493,7 @@ def test_build_hyperhomodesmotic_requires_scipy():
     if milp is None:
         pytest.skip("scipy not available")
     group_delta = Counter({"C(H3)(O_s0)(O_d0)(N_s0)(N_d0)(N_t0)(=C0)(#C0)": 2})
-    left, right, success = build_hyperhomodesmotic_balance_terms(group_delta)
+    left, right, success, unmet = build_hyperhomodesmotic_balance_terms(group_delta)
     assert isinstance(success, bool)
     assert isinstance(left, tuple)
     assert isinstance(right, tuple)

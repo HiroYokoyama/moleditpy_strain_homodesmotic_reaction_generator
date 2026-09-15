@@ -19,7 +19,8 @@ Repo: [https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_ge
 - **Expanded Support**: Auto-detects and balances ketones, aldehydes, amines (primary, secondary, tertiary), and extended alkanes.
 - **MILP Optimization**: Uses mixed-integer linear programming (MILP) via SciPy to find the optimal set of balance species.
 - **Robust Fallback**: Displays a warning and falls back to simple elemental balance mode if SciPy is not installed or environment constraints prevent exact homodesmotic balancing.
-- **Interactive UI**: View colored reaction equations, load reference species directly back into MoleditPy, and export results as CSV, HTML, or TXT.
+- **Your Own Species**: Add balance species of your own, mark one **Required** to force it into the equation, or override the reference molecule proposed for an environment. Every change re-analyzes at once and the reaction type is re-derived, so a substitution that breaks the balance is reported as broken.
+- **Interactive UI**: View colored reaction equations, sort the results table by any column, load reference species directly back into MoleditPy, and export results as CSV, HTML, or TXT.
 
 ## Files
 
@@ -37,7 +38,12 @@ Download from MoleditPy [Plugin Explorer](https://hiroyokoyama.github.io/moledit
 2. Choose **Analysis > Strain Homodesmotic Reaction Generator**.
 3. Click **Analyze Current Molecule**.
 4. Review the detected environments, automatically generated balancing species, and any unresolved atom-balance entries.
-5. Export the analysis as CSV, HTML, or text if needed. Sample report is available [here](./sample/strain_homodesmotic_reaction_draft_sample.html).
+5. To use different molecules, open **Add Species...** under *Your species and overrides*:
+   - **Balance species** joins the library the solver may draw on. Tick **Required** to force it into the equation.
+   - **Reference molecule override** replaces the molecule proposed for one detected environment.
+
+   Entries can be edited or removed in that table, and **Reset to Defaults** clears them. The results table above is read-only: it reports what the solver produced.
+6. Export the analysis as CSV, HTML, or text if needed. Sample report is available [here](./sample/strain_homodesmotic_reaction_draft_sample.html).
 
 HTML export preserves the dialog color coding:
 
@@ -45,7 +51,10 @@ HTML export preserves the dialog color coding:
 - **Yellow**: balancing cores to adjust over-counted bonds.
 - **Green**: automatically added left balance species and caps.
 - **Purple**: automatically added right balance species.
+- **Orange**: species and references you specified yourself.
 - **Red**: unresolved species that still need manual chemistry review.
+
+Reports quote your SMILES exactly as typed, in a **User-specified input** section, alongside anything the analysis could not honour: a required species no balance could use, or a reference the solver had to cancel against itself.
 
 The generated equation is a draft. The atom-balance summary shows which atoms were balanced automatically and which atoms still need additional balancing species before using quantum-chemical energies.
 

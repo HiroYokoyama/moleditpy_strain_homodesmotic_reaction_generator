@@ -131,6 +131,11 @@ def _install_qt_stubs():
         class AlignmentFlag:
             AlignCenter = 1
 
+        class ItemFlag:
+            ItemIsSelectable = 1
+            ItemIsEditable = 2
+            ItemIsEnabled = 32
+
     class _QDialog(_QBase):
         def __init__(self, parent=None, *args, **kwargs):
             super().__init__(parent, *args, **kwargs)
@@ -231,9 +236,23 @@ def _install_qt_stubs():
             self._text = text
             self._foreground = None
             self._background = None
+            self._tooltip = ""
+            self._flags = (
+                _Qt.ItemFlag.ItemIsSelectable
+                | _Qt.ItemFlag.ItemIsEditable
+                | _Qt.ItemFlag.ItemIsEnabled
+            )
+            self._table = None
+            self._row = -1
+            self._column = -1
 
         def text(self):
             return self._text
+
+        def setText(self, text):
+            self._text = text
+            if self._table is not None:
+                self._table._emit_item_changed(self)
 
         def setForeground(self, brush):
             self._foreground = brush
@@ -247,6 +266,50 @@ def _install_qt_stubs():
         def background(self):
             return self._background
 
+        def setToolTip(self, tooltip):
+            self._tooltip = tooltip
+
+        def toolTip(self):
+            return self._tooltip
+
+        def flags(self):
+            return self._flags
+
+        def setFlags(self, flags):
+            self._flags = flags
+
+        def row(self):
+            return self._row
+
+        def column(self):
+            return self._column
+
+    class _QModelIndex:
+        def __init__(self, row, column):
+            self._row = row
+            self._column = column
+
+        def row(self):
+            return self._row
+
+        def column(self):
+            return self._column
+
+    class _QHeader(_QBase):
+        def __init__(self):
+            super().__init__()
+            self.sectionClicked = _BoundSignal()
+            self._visible = True
+
+        def setSectionResizeMode(self, *args, **kwargs):
+            pass
+
+        def setSectionsClickable(self, clickable):
+            self._clickable = clickable
+
+        def setVisible(self, visible):
+            self._visible = visible
+
     class _QTableWidget(_QBase):
         def __init__(self, rows=0, cols=0, *args, **kwargs):
             super().__init__(*args, **kwargs)
@@ -255,6 +318,26 @@ def _install_qt_stubs():
             self._items = {}
             self._cell_widgets = {}
             self._header_labels = []
+            self._selected = []
+            self._h_header = _QHeader()
+            self._v_header = _QHeader()
+            self.itemChanged = _BoundSignal()
+
+        def horizontalHeader(self):
+            return self._h_header
+
+        def verticalHeader(self):
+            return self._v_header
+
+        def selectedIndexes(self):
+            return [_QModelIndex(row, col) for row, col in self._selected]
+
+        def selectRows(self, rows):
+            """Test helper: pretend the user selected these rows."""
+            self._selected = [(row, 0) for row in rows]
+
+        def _emit_item_changed(self, item):
+            self.itemChanged.emit(item)
 
         def setRowCount(self, n):
             self._rows = n
@@ -277,6 +360,9 @@ def _install_qt_stubs():
 
         def setItem(self, row, col, item):
             self._items[(row, col)] = item
+            item._table = self
+            item._row = row
+            item._column = col
 
         def item(self, row, col):
             return self._items.get((row, col))
@@ -349,6 +435,92 @@ def _install_qt_stubs():
             Stretch = 1
             ResizeToContents = 2
 
+    class _QGroupBox(_QBase):
+        def __init__(self, title="", *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._title = title
+            self._layout = None
+
+        def setLayout(self, layout):
+            self._layout = layout
+
+        def title(self):
+            return self._title
+
+    class _QLineEdit(_QBase):
+        def __init__(self, text="", *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._text = text
+            self._placeholder = ""
+            self._visible = True
+
+        def text(self):
+            return self._text
+
+        def setText(self, text):
+            self._text = text
+
+        def setPlaceholderText(self, text):
+            self._placeholder = text
+
+        def setVisible(self, visible):
+            self._visible = visible
+
+        def isVisible(self):
+            return self._visible
+
+    class _QCheckBox(_QBase):
+        def __init__(self, text="", *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._text = text
+            self._checked = False
+            self._visible = True
+
+        def isChecked(self):
+            return self._checked
+
+        def setChecked(self, checked):
+            self._checked = checked
+
+        def setVisible(self, visible):
+            self._visible = visible
+
+        def isVisible(self):
+            return self._visible
+
+    class _QComboBox(_QBase):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._items = []
+            self._current = 0
+            self._visible = True
+            self.currentTextChanged = _BoundSignal()
+
+        def addItem(self, text):
+            self._items.append(text)
+
+        def count(self):
+            return len(self._items)
+
+        def itemText(self, index):
+            return self._items[index]
+
+        def currentText(self):
+            if not self._items:
+                return ""
+            return self._items[self._current]
+
+        def setCurrentText(self, text):
+            if text in self._items:
+                self._current = self._items.index(text)
+                self.currentTextChanged.emit(text)
+
+        def setVisible(self, visible):
+            self._visible = visible
+
+        def isVisible(self):
+            return self._visible
+
     class _QLayout(_QBase):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
@@ -370,8 +542,12 @@ def _install_qt_stubs():
     qt_core.QObject = _QObject
 
     qt_widgets = types.ModuleType("PyQt6.QtWidgets")
+    qt_widgets.QCheckBox = _QCheckBox
+    qt_widgets.QComboBox = _QComboBox
     qt_widgets.QDialog = _QDialog
     qt_widgets.QFileDialog = _QFileDialog
+    qt_widgets.QGroupBox = _QGroupBox
+    qt_widgets.QLineEdit = _QLineEdit
     qt_widgets.QHeaderView = _QHeaderView
     qt_widgets.QHBoxLayout = _QLayout
     qt_widgets.QLabel = _QLabel

@@ -59,7 +59,7 @@ def test_terminal_heteroatoms_are_not_treated_as_cage_ether_environments():
 
 
 def test_build_balance_terms_uses_simple_reference_species():
-    terms, unresolved = build_balance_terms(Counter({"C": 2, "H": 6}))
+    terms, unresolved, unmet = build_balance_terms(Counter({"C": 2, "H": 6}))
 
     assert unresolved == Counter()
     assert [(term.name, term.smiles, term.count) for term in terms] == [
@@ -68,7 +68,7 @@ def test_build_balance_terms_uses_simple_reference_species():
 
 
 def test_build_balance_terms_resolves_large_hydrocarbon_balance():
-    terms, unresolved = build_balance_terms(Counter({"C": 88, "H": 224}))
+    terms, unresolved, unmet = build_balance_terms(Counter({"C": 88, "H": 224}))
 
     atom_total = Counter()
     for term in terms:
