@@ -684,9 +684,11 @@ if QDialog is not None:
         def add_species(self) -> None:
             dialog = AddSpeciesDialog(self, self._environment_names())
             dialog.exec()
-            if dialog.entry is None:
+            entry = dialog.entry
+            dialog.deleteLater()
+            if entry is None:
                 return
-            self.apply_new_entry(dialog.entry)
+            self.apply_new_entry(entry)
 
         def _on_row_double_clicked(self, item: Any) -> None:
             """Double-clicking a row edits it; the cells themselves never do."""
@@ -709,9 +711,11 @@ if QDialog is not None:
                 return
             dialog = AddSpeciesDialog(self, self._environment_names(), existing)
             dialog.exec()
-            if dialog.entry is None:
+            entry = dialog.entry
+            dialog.deleteLater()
+            if entry is None:
                 return
-            self.apply_new_entry(dialog.entry, replacing=existing)
+            self.apply_new_entry(entry, replacing=existing)
 
         def remove_selected_species(self) -> None:
             row = self._selected_row()
@@ -882,6 +886,7 @@ if QDialog is not None:
 
             self.analysis_thread.start()
             self.loading_dialog.exec()
+            self.loading_dialog.deleteLater()
 
         def on_analysis_success(self, result: AnalysisResult) -> None:
             self.analyze_button.setEnabled(True)
@@ -1304,6 +1309,7 @@ if QDialog is not None:
         def test_equation(self) -> None:
             dialog = TestEquationDialog(self, self.current_equation_text())
             dialog.exec()
+            dialog.deleteLater()
 
         def export_analysis(self) -> None:
             path, _ = QFileDialog.getSaveFileName(

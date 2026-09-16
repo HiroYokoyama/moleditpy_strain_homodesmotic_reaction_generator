@@ -1869,8 +1869,15 @@ class EquationCheck:
         return not self.errors
 
 
-#: Everything people type or paste for the arrow.
-_ARROWS = ("->", "=>", "-->", "→", "⟶", "➔")
+#: Everything people type or paste for the arrow, longest first: replacing
+#: "->" before "-->" would leave the extra dash behind on the left-hand side.
+_ARROWS = tuple(
+    sorted(
+        ("->", "=>", "-->", "==>", "→", "⟶", "➔"),
+        key=len,
+        reverse=True,
+    )
+)
 
 
 def _split_on_plus(text: str) -> list[str]:
@@ -1941,8 +1948,29 @@ def parse_equation_side(text: str) -> tuple[list[tuple[int, str]], list[str]]:
         if mol is None:
             errors.append(f"Cannot read '{term}' as a molecule.")
             continue
+        stray = _stray_molecule(rest)
+        if stray:
+            errors.append(f"Missing '+' before '{stray}'?")
+            continue
         terms.append((count, smiles))
     return terms, errors
+
+
+def _stray_molecule(term: str) -> str:
+    """A second molecule sitting in one term, i.e. a forgotten ``+``.
+
+    Everything after the SMILES is treated as its name, so a missing ``+``
+    would otherwise drop a whole species and hand back a confident verdict on
+    the wrong reaction. A real name is not mistaken for one: "(propane)" and
+    "ethane" do not parse as SMILES.
+    """
+    tail = term.split()[1:]
+    for index, token in enumerate(tail):
+        if token.startswith(("(", "#", "//")):
+            return ""
+        if _quiet_smiles(token) is not None:
+            return " ".join(tail[index:])
+    return ""
 
 
 def parse_equation(

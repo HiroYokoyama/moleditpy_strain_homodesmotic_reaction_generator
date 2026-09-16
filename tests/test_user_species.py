@@ -998,6 +998,9 @@ def test_double_clicking_a_row_opens_its_edit_dialog(monkeypatch):
         def exec(self):
             return 0
 
+        def deleteLater(self):
+            pass
+
     monkeypatch.setattr(ui, "AddSpeciesDialog", _Dialog)
     dialog = _dialog()
     row = _row_index(dialog, CP_DEFAULT_REFERENCE)
