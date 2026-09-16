@@ -51,7 +51,10 @@ from .core import (
     Chem,
     AnalysisResult,
     analyze_molecule,
+    build_equation_check_html,
+    check_equation,
     export_analysis,
+    format_equation_sides,
     is_valid_smiles,
     milp,
 )
@@ -486,6 +489,64 @@ if QDialog is not None:
                 )
             self.accept()
 
+    class TestEquationDialog(QDialog):
+        """Check an equation the user wrote, rather than one this tool built.
+
+        The same classifier judges it, so a scheme from a paper and a scheme
+        from the solver are held to the same standard.
+        """
+
+        def __init__(self, parent: Any, initial: str = "") -> None:
+            super().__init__(parent)
+            self.setWindowTitle("Test Equation")
+            self.resize(820, 620)
+
+            layout = QVBoxLayout(self)
+
+            hint = QLabel(
+                "Write a reaction as 'A + 2 B -> 3 C'. SMILES with a coefficient "
+                "in front, separated by '+'. A line copied out of the report "
+                "works as it is: names in brackets are ignored."
+            )
+            hint.setWordWrap(True)
+            layout.addWidget(hint)
+
+            self.input_box = QTextEdit()
+            self.input_box.setPlainText(initial)
+            self.input_box.setMaximumHeight(110)
+            self.input_box.setStyleSheet(
+                "font-family: Consolas, monospace; font-size: 14px;"
+            )
+            layout.addWidget(self.input_box)
+
+            button_row = QHBoxLayout()
+            self.check_button = QPushButton("Check")
+            self.check_button.setDefault(True)
+            self.close_button = QPushButton("Close")
+            self.close_button.setAutoDefault(False)
+            button_row.addWidget(self.check_button)
+            button_row.addStretch()
+            button_row.addWidget(self.close_button)
+            layout.addLayout(button_row)
+
+            self.result_box = QTextEdit()
+            self.result_box.setReadOnly(True)
+            self.result_box.setStyleSheet(
+                "background-color: #202124; color: #e8eaed; "
+                "font-family: Consolas, monospace; font-size: 15px;"
+            )
+            self.result_box.setMinimumHeight(300)
+            layout.addWidget(self.result_box, 1)
+
+            self.check_button.clicked.connect(self.check)
+            self.close_button.clicked.connect(self.reject)
+            if initial:
+                self.check()
+
+        def check(self) -> None:
+            self.last_check = check_equation(self.input_box.toPlainText())
+            self.result_box.setHtml(build_equation_check_html(self.last_check))
+
     class HomodesmoticAnalyzerDialog(QDialog):
         """Qt dialog for the analyzer.
 
@@ -567,6 +628,7 @@ if QDialog is not None:
             self.remove_species_button = QPushButton("Remove Selected")
             self.reset_species_button = QPushButton("Reset to Defaults")
             self.analyze_button = QPushButton("Analyze")
+            self.test_button = QPushButton("Test Equation...")
             self.export_button = QPushButton("Export Analysis")
             button_row.addWidget(self.add_species_button)
             button_row.addWidget(self.edit_species_button)
@@ -574,6 +636,7 @@ if QDialog is not None:
             button_row.addWidget(self.reset_species_button)
             button_row.addStretch()
             button_row.addWidget(self.analyze_button)
+            button_row.addWidget(self.test_button)
             button_row.addWidget(self.export_button)
             layout.addLayout(button_row)
 
@@ -591,7 +654,12 @@ if QDialog is not None:
             self.remove_species_button.clicked.connect(self.remove_selected_species)
             self.reset_species_button.clicked.connect(self.reset_species)
             self.analyze_button.clicked.connect(self.refresh_analysis)
+            self.test_button.clicked.connect(self.test_equation)
             self.export_button.clicked.connect(self.export_analysis)
+            self.test_button.setToolTip(
+                "Check an equation of your own, or the current draft after "
+                "editing it by hand."
+            )
 
             self.equation_box = QTextEdit()
             self.equation_box.setReadOnly(True)
@@ -1207,6 +1275,35 @@ if QDialog is not None:
             if hasattr(self.context, "register_window"):
                 self.context.register_window(WINDOW_ID, None)
             super().closeEvent(event)
+
+        def current_equation_text(self) -> str:
+            """The draft as one line, ready to be edited in the tester."""
+            result = self.last_result
+            if not result.target_smiles:
+                return ""
+            left = [(1, result.target_smiles)]
+            left += [
+                (term.count, term.smiles)
+                for term in result.left_balance_terms
+                if term.count > 0
+            ]
+            right = [
+                (match.count, match.reference_smiles)
+                for match in result.matches
+                if match.count > 0
+            ]
+            right += [
+                (term.count, term.smiles)
+                for term in result.right_balance_terms
+                if term.count > 0
+            ]
+            if not right:
+                return ""
+            return format_equation_sides(left, right)
+
+        def test_equation(self) -> None:
+            dialog = TestEquationDialog(self, self.current_equation_text())
+            dialog.exec()
 
         def export_analysis(self) -> None:
             path, _ = QFileDialog.getSaveFileName(

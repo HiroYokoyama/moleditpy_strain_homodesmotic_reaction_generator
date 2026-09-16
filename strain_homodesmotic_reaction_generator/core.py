@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import html
+import re
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
@@ -95,6 +96,14 @@ class AnalysisResult:
     cancelled_references: tuple[str, ...] = ()
     excluded_species: tuple[str, ...] = ()
     ignored_exclusions: tuple[str, ...] = ()
+
+
+#: Shown wherever the tool states a verdict. It conserves what it counts, and
+#: what it counts is not the whole of the chemistry.
+SELF_CHECK_NOTE = (
+    "This is a generated draft. Check the equation and the reference molecules "
+    "yourself before using the energies."
+)
 
 
 def _require_rdkit() -> None:
@@ -310,35 +319,35 @@ def classify_reaction_type(
     if unresolved_left_atoms or unresolved_right_atoms:
         return "Unbalanced"
 
-    def get_mol(smiles: str) -> Any:
-        if not smiles:
-            return None
-        m = Chem.MolFromSmiles(smiles)
-        return Chem.AddHs(m) if m is not None else None
+    left: list[tuple[int, str]] = []
+    if target_smiles:
+        left.append((1, target_smiles))
+    left += [(term.count, term.smiles) for term in left_balance_terms if term.count > 0]
+    right = [(term.count, term.smiles) for term in rhs_terms if term.count > 0]
+    right += [
+        (term.count, term.smiles) for term in right_balance_terms if term.count > 0
+    ]
+    return classify_sides(left, right)
 
-    # Gather LHS molecules
-    lhs_mols: list[tuple[Any, int]] = []
-    t_mol = get_mol(target_smiles)
-    if t_mol is not None:
-        lhs_mols.append((t_mol, 1))
-    for term in left_balance_terms:
-        if term.count > 0:
-            m = get_mol(term.smiles)
-            if m is not None:
-                lhs_mols.append((m, term.count))
 
-    # Gather RHS molecules
-    rhs_mols: list[tuple[Any, int]] = []
-    for term in rhs_terms:
-        if term.count > 0:
-            m = get_mol(term.smiles)
-            if m is not None:
-                rhs_mols.append((m, term.count))
-    for term in right_balance_terms:
-        if term.count > 0:
-            m = get_mol(term.smiles)
-            if m is not None:
-                rhs_mols.append((m, term.count))
+def classify_sides(
+    left: Sequence[tuple[int, str]], right: Sequence[tuple[int, str]]
+) -> str:
+    """Classify a reaction given both sides as (coefficient, SMILES) pairs."""
+    _require_rdkit()
+
+    def gather(side: Sequence[tuple[int, str]]) -> list[tuple[Any, int]]:
+        mols = []
+        for count, smiles in side:
+            if count <= 0 or not smiles:
+                continue
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is not None:
+                mols.append((Chem.AddHs(mol), count))
+        return mols
+
+    lhs_mols = gather(left)
+    rhs_mols = gather(right)
 
     # 1. Elemental Balance check
     lhs_atoms: Counter[str] = Counter()
@@ -1460,6 +1469,7 @@ def build_equation_text(
         "SE = sum(E_products) - sum(E_reactants)\n\n"
         "Notes\n"
         "-----\n"
+        f"{SELF_CHECK_NOTE}\n\n"
         "This tool detects predefined local environments and proposes reference "
         "molecules. Simple balancing species are added automatically when the "
         "atom-count difference can be represented by the built-in molecule library.\n\n"
@@ -1834,6 +1844,300 @@ def build_equation_html(
         '<p style="color:#9aa0a6; font-size:12px; margin-top:8px;">'
         "Note: Common balancing species and reference molecules appearing on both sides "
         "of the equation have been algebraically cancelled to prevent redundant reference calculations.</p>"
+        f'<p style="color:#fde293; font-size:12px; margin-top:8px;">'
+        f"{html.escape(SELF_CHECK_NOTE)}</p>"
+        "</div>"
+    )
+
+
+@dataclass(frozen=True)
+class EquationCheck:
+    """What a hand-written equation conserves, and what it does not."""
+
+    left: tuple[tuple[int, str], ...]
+    right: tuple[tuple[int, str], ...]
+    reaction_type: str
+    atom_delta: Counter[str]
+    group_delta: Counter[str]
+    bond_delta: Counter[str]
+    lhs_bonds: Counter[str]
+    rhs_bonds: Counter[str]
+    errors: tuple[str, ...]
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors
+
+
+#: Everything people type or paste for the arrow.
+_ARROWS = ("->", "=>", "-->", "→", "⟶", "➔")
+
+
+def _split_on_plus(text: str) -> list[str]:
+    """Split on ``+`` at bracket depth zero.
+
+    A charge lives inside brackets -- ``[NH4+]`` -- so a naive split would cut
+    a perfectly good SMILES in half.
+    """
+    parts: list[str] = []
+    depth = 0
+    current: list[str] = []
+    for char in text:
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth = max(0, depth - 1)
+        if char == "+" and depth == 0:
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    parts.append("".join(current))
+    return parts
+
+
+def _quiet_smiles(smiles: str) -> Any:
+    """Parse without RDKit narrating every rejected candidate to stderr."""
+    if Chem is None or not smiles:
+        return None
+    try:
+        from rdkit import rdBase
+
+        with rdBase.BlockLogs():
+            return Chem.MolFromSmiles(smiles)
+    except (ImportError, AttributeError):  # pragma: no cover - old RDKit
+        return Chem.MolFromSmiles(smiles)
+
+
+def _read_species(term: str) -> tuple[Any, str]:
+    """Read a term as a SMILES, ignoring any name after it.
+
+    A SMILES never contains whitespace, so the first token is the molecule and
+    the rest is a label -- which is how the report writes it, ``CCC (propane)``,
+    and how RDKit itself reads a SMILES file. Trusting RDKit to reject the tail
+    would not work: it happily parses ``CCC (propane)`` as propane *named*
+    "(propane)", and the annotation would then be kept as part of the SMILES.
+    """
+    candidate = term.split()[0] if term.split() else ""
+    return _quiet_smiles(candidate), candidate
+
+
+def parse_equation_side(text: str) -> tuple[list[tuple[int, str]], list[str]]:
+    """Parse one side into (coefficient, SMILES) pairs, plus any complaints."""
+    terms: list[tuple[int, str]] = []
+    errors: list[str] = []
+    for raw in _split_on_plus(text):
+        term = raw.strip()
+        if not term:
+            continue
+        match = re.match(r"^(\d+)\s+(.*)$", term)
+        if match:
+            count, rest = int(match.group(1)), match.group(2)
+        else:
+            count, rest = 1, term
+        if count == 0:
+            continue
+        mol, smiles = _read_species(rest)
+        if mol is None:
+            errors.append(f"Cannot read '{term}' as a molecule.")
+            continue
+        terms.append((count, smiles))
+    return terms, errors
+
+
+def parse_equation(
+    text: str,
+) -> tuple[list[tuple[int, str]], list[tuple[int, str]], list[str]]:
+    """Parse ``A + 2 B -> 3 C`` into both sides.
+
+    Accepts a line copied straight out of the report, coefficients and all.
+    """
+    cleaned = (text or "").strip()
+    for arrow in _ARROWS:
+        cleaned = cleaned.replace(arrow, "\n->\n")
+    pieces = [piece.strip() for piece in cleaned.split("\n->\n")]
+    if len(pieces) == 1:
+        return [], [], ["No arrow found. Write the reaction as 'A + B -> C'."]
+    if len(pieces) > 2:
+        return [], [], ["More than one arrow found."]
+
+    left, left_errors = parse_equation_side(pieces[0])
+    right, right_errors = parse_equation_side(pieces[1])
+    errors = left_errors + right_errors
+    if not left:
+        errors.append("Nothing on the left of the arrow.")
+    if not right:
+        errors.append("Nothing on the right of the arrow.")
+    return left, right, errors
+
+
+def _side_totals(side: Sequence[tuple[int, str]], counter: Any) -> Counter[str]:
+    totals: Counter[str] = Counter()
+    for count, smiles in side:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            continue
+        for key, value in counter(mol).items():
+            totals[key] += count * value
+    return totals
+
+
+def _delta(left: Counter[str], right: Counter[str]) -> Counter[str]:
+    delta: Counter[str] = Counter()
+    for key in sorted(set(left) | set(right)):
+        difference = right[key] - left[key]
+        if difference:
+            delta[key] = difference
+    return delta
+
+
+def check_equation(text: str) -> EquationCheck:
+    """Judge an equation the user typed, by the same rules as a generated one."""
+    _require_rdkit()
+    left, right, errors = parse_equation(text)
+    if errors:
+        return EquationCheck(
+            tuple(left),
+            tuple(right),
+            "Unbalanced",
+            Counter(),
+            Counter(),
+            Counter(),
+            Counter(),
+            Counter(),
+            tuple(errors),
+        )
+
+    atoms_left = _side_totals(left, lambda m: atom_counts(explicit_hydrogen_copy(m)))
+    atoms_right = _side_totals(right, lambda m: atom_counts(explicit_hydrogen_copy(m)))
+    groups_left = _side_totals(left, count_groups)
+    groups_right = _side_totals(right, count_groups)
+    bonds_left = _side_totals(left, bond_counts)
+    bonds_right = _side_totals(right, bond_counts)
+
+    return EquationCheck(
+        tuple(left),
+        tuple(right),
+        classify_sides(left, right),
+        _delta(atoms_left, atoms_right),
+        _delta(groups_left, groups_right),
+        _delta(bonds_left, bonds_right),
+        bonds_left,
+        bonds_right,
+        (),
+    )
+
+
+def format_equation_sides(
+    left: Sequence[tuple[int, str]], right: Sequence[tuple[int, str]]
+) -> str:
+    """Render both sides as the one-line form the tester reads back."""
+
+    def side(terms: Sequence[tuple[int, str]]) -> str:
+        return " + ".join(
+            smiles if count == 1 else f"{count} {smiles}" for count, smiles in terms
+        )
+
+    return f"{side(left)} -> {side(right)}"
+
+
+def build_equation_check_text(check: EquationCheck) -> str:
+    """Plain-text verdict on a hand-written equation."""
+    if check.errors:
+        return "Equation Check\n==============\n\n" + "\n".join(
+            f"  - {error}" for error in check.errors
+        )
+
+    def verdict(name: str, delta: Counter[str]) -> str:
+        if not delta:
+            return f"{name}: conserved"
+        detail = ", ".join(f"{key}: {value:+}" for key, value in sorted(delta.items()))
+        return f"{name}: NOT conserved ({detail})"
+
+    return (
+        "Equation Check\n"
+        "==============\n\n"
+        f"{format_equation_sides(check.left, check.right)}\n\n"
+        f"Reaction type: {check.reaction_type}\n"
+        f"{verdict('Atoms', check.atom_delta)}\n"
+        f"{verdict('Groups', check.group_delta)}\n"
+        f"{verdict('Bond types', check.bond_delta)}\n\n"
+        f"Left-side bond counts: {format_counter(check.lhs_bonds)}\n"
+        f"Right-side bond counts: {format_counter(check.rhs_bonds)}\n\n"
+        "Deltas are right minus left. Atoms must balance for any reaction; "
+        "groups as well for a homodesmotic one; bond types as well for a "
+        f"hyperhomodesmotic one.\n\n{SELF_CHECK_NOTE}"
+    )
+
+
+def build_equation_check_html(check: EquationCheck) -> str:
+    """Styled verdict, matching the draft report."""
+    if check.errors:
+        items = "".join(f"<li>{html.escape(error)}</li>" for error in check.errors)
+        return (
+            '<div style="font-family:Consolas, monospace; color:#e8eaed;">'
+            '<h3 style="margin:0 0 8px 0;">Equation Check</h3>'
+            f'<ul style="color:#f28b82;">{items}</ul>'
+            "</div>"
+        )
+
+    def row(name: str, delta: Counter[str]) -> str:
+        if not delta:
+            state = '<span style="color:#81c995; font-weight:bold;">conserved</span>'
+            detail = ""
+        else:
+            state = (
+                '<span style="color:#f28b82; font-weight:bold;">not conserved</span>'
+            )
+            detail = (
+                " ("
+                + ", ".join(
+                    f"{html.escape(key)}: {value:+}"
+                    for key, value in sorted(delta.items())
+                )
+                + ")"
+            )
+        return f'<li><span style="color:#9aa0a6;">{name}</span>: {state}{detail}</li>'
+
+    equation = " + ".join(
+        color_smiles_atoms(
+            smiles if count == 1 else f"{count} {smiles}",
+            "#8ab4f8",
+            "Left-side species",
+        )
+        for count, smiles in check.left
+    )
+    equation += ' <span style="color:#e8eaed;">-&gt;</span> '
+    equation += " + ".join(
+        color_smiles_atoms(
+            smiles if count == 1 else f"{count} {smiles}",
+            "#c58af9",
+            "Right-side species",
+        )
+        for count, smiles in check.right
+    )
+
+    return (
+        '<div style="font-family:Consolas, monospace; color:#e8eaed;">'
+        '<h3 style="margin:0 0 8px 0; color:#e8eaed;">Equation Check</h3>'
+        f'<p style="font-size:16px; line-height:1.6; margin:16px 0;">{equation}</p>'
+        '<hr style="border:0; border-top:1px solid #3c4043;">'
+        f'<p><span style="color:#9aa0a6;">Reaction Type:</span> '
+        f'<span style="color:{get_reaction_type_color(check.reaction_type)}; '
+        f'font-weight:bold;">{html.escape(check.reaction_type)}</span></p>'
+        '<ul style="margin:4px 0 12px 16px; padding:0; list-style-type:disc;">'
+        + row("Atoms", check.atom_delta)
+        + row("Groups", check.group_delta)
+        + row("Bond types", check.bond_delta)
+        + "</ul>"
+        f'<p><span style="color:#9aa0a6;">Left-side bond counts:</span> '
+        f"{_html_counter(check.lhs_bonds, '#e8eaed', 'Left-side bond')}</p>"
+        f'<p><span style="color:#9aa0a6;">Right-side bond counts:</span> '
+        f"{_html_counter(check.rhs_bonds, '#e8eaed', 'Right-side bond')}</p>"
+        '<p style="color:#9aa0a6; font-size:12px;">Deltas are right minus left. '
+        "Atoms must balance for any reaction; groups as well for a homodesmotic "
+        "one; bond types as well for a hyperhomodesmotic one.</p>"
+        f'<p style="color:#fde293; font-size:12px;">{html.escape(SELF_CHECK_NOTE)}</p>'
         "</div>"
     )
 

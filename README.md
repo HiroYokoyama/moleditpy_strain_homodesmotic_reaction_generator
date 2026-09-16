@@ -20,6 +20,7 @@ Repo: [https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_ge
 - **MILP Optimization**: Uses mixed-integer linear programming (MILP) via SciPy to find the optimal set of balance species.
 - **Robust Fallback**: Displays a warning and falls back to simple elemental balance mode if SciPy is not installed or environment constraints prevent exact homodesmotic balancing.
 - **Your Own Species**: Add balance species of your own, mark one **Required** to force it into the equation, override the reference molecule proposed for an environment, or exclude a species you cannot compute so the solver works around it. The reaction type is re-derived from whatever equation your choices produce, so a substitution that breaks the balance is reported as broken rather than accepted.
+- **Test Equation**: Type or paste any reaction - including a line copied straight out of the report - and have it graded by the same classifier the generated draft uses.
 - **Interactive UI**: One table holds the whole draft - references, balance species, and any entry of yours the equation could not use. Sort by any column, load a species back into MoleditPy, and export as CSV, HTML, or TXT.
 
 ## Files

@@ -426,6 +426,15 @@ def _install_qt_stubs():
         def setHtml(self, html):
             self._html = html
 
+        def setPlainText(self, text):
+            self._plain = text
+
+        def toPlainText(self):
+            return getattr(self, "_plain", "")
+
+        def setMaximumHeight(self, h):
+            pass
+
         def toHtml(self):
             return self._html
 
