@@ -154,6 +154,108 @@ def _current_molecule(context: Any) -> Any:
     return context.current_molecule
 
 
+#: Survives closing the dialog and is what the project file stores. Keyed the
+#: same way the dialog holds it, so the two never need translating.
+_session: dict = {"reference_overrides": {}, "user_species": [], "excluded": []}
+
+#: The live dialog, so a project load reaches it instead of only the session.
+_open_dialog: Any = None
+
+#: Bumped if the stored shape ever changes; an older file is read on trust,
+#: a newer one is ignored rather than half-understood.
+SESSION_FORMAT = 1
+
+
+def session_state() -> dict:
+    """What to write into the project file. Empty when nothing was specified."""
+    overrides = dict(_session["reference_overrides"])
+    species = list(_session["user_species"])
+    excluded = list(_session["excluded"])
+    if not (overrides or species or excluded):
+        return {}
+    return {
+        "format": SESSION_FORMAT,
+        "reference_overrides": overrides,
+        "user_species": [
+            {
+                "smiles": entry.smiles,
+                "name": entry.name,
+                "required": entry.required,
+                "side": entry.side,
+            }
+            for entry in species
+        ],
+        "excluded": excluded,
+    }
+
+
+def restore_session_state(data: Any) -> None:
+    """Read a project file's entries back.
+
+    Everything here came off disk and may have been edited by hand, so each
+    field is checked rather than trusted: a malformed entry is dropped, not
+    carried into the solver.
+    """
+    if not isinstance(data, dict) or data.get("format", SESSION_FORMAT) > (
+        SESSION_FORMAT
+    ):
+        return
+
+    raw_overrides = data.get("reference_overrides")
+    overrides = {}
+    known = {rule.name for rule in ENVIRONMENTS}
+    if isinstance(raw_overrides, dict):
+        for name, smiles in raw_overrides.items():
+            if isinstance(name, str) and name in known and is_valid_smiles(smiles):
+                overrides[name] = smiles.strip()
+
+    raw_species = data.get("user_species")
+    species = []
+    for raw in raw_species if isinstance(raw_species, (list, tuple)) else ():
+        if not isinstance(raw, dict) or not is_valid_smiles(raw.get("smiles")):
+            continue
+        side = raw.get("side", SIDE_ANY)
+        species.append(
+            UserSpecies(
+                raw["smiles"].strip(),
+                str(raw.get("name") or ""),
+                bool(raw.get("required")),
+                side if side in (SIDE_ANY, SIDE_LEFT, SIDE_RIGHT) else SIDE_ANY,
+            )
+        )
+
+    raw_excluded = data.get("excluded")
+    excluded = [
+        smiles.strip()
+        for smiles in (raw_excluded if isinstance(raw_excluded, (list, tuple)) else ())
+        if is_valid_smiles(smiles)
+    ]
+
+    _session["reference_overrides"] = overrides
+    _session["user_species"] = species
+    _session["excluded"] = excluded
+    _push_session_to_dialog()
+
+
+def reset_session_state() -> None:
+    """File -> New: the entries belonged to the document that just closed."""
+    _session["reference_overrides"] = {}
+    _session["user_species"] = []
+    _session["excluded"] = []
+    _push_session_to_dialog()
+
+
+def _push_session_to_dialog() -> None:
+    """Hand the session to an open dialog, staged rather than re-analyzed."""
+    dialog = _open_dialog
+    if dialog is None:
+        return
+    dialog.reference_overrides = dict(_session["reference_overrides"])
+    dialog.user_species = list(_session["user_species"])
+    dialog.excluded = list(_session["excluded"])
+    dialog._stage()
+
+
 def _default_reference(environment: str) -> str:
     """The built-in reference molecule for an environment, "" if unknown."""
     for rule in ENVIRONMENTS:
@@ -397,9 +499,9 @@ if QDialog is not None:
             super().__init__(parent=context.get_main_window())
             self.context = context
             self.last_result = _empty_result()
-            self.reference_overrides: dict[str, str] = {}
-            self.user_species: list[UserSpecies] = []
-            self.excluded: list[str] = []
+            self.reference_overrides = dict(_session["reference_overrides"])
+            self.user_species = list(_session["user_species"])
+            self.excluded = list(_session["excluded"])
             self._table_rows: list[dict] = []
             self._sort_state: tuple[int, bool] | None = None
 
@@ -603,6 +705,9 @@ if QDialog is not None:
             per edit would put a modal wait between the user and every
             keystroke. Changes accumulate and Analyze applies them.
             """
+            _session["reference_overrides"] = dict(self.reference_overrides)
+            _session["user_species"] = list(self.user_species)
+            _session["excluded"] = list(self.excluded)
             self._populate_table(self.last_result)
             self._update_pending()
 
@@ -1090,6 +1195,19 @@ if QDialog is not None:
             )
             _status(self.context, "SMILES importer is not available.", 5000)
 
+        def closeEvent(self, event: Any) -> None:
+            """Let the host hand out a fresh dialog next time.
+
+            A closed dialog left registered is the reason the editors in this
+            suite used to come back with dead picking.
+            """
+            global _open_dialog
+            if _open_dialog is self:
+                _open_dialog = None
+            if hasattr(self.context, "register_window"):
+                self.context.register_window(WINDOW_ID, None)
+            super().closeEvent(event)
+
         def export_analysis(self) -> None:
             path, _ = QFileDialog.getSaveFileName(
                 self,
@@ -1137,6 +1255,8 @@ def open_analyzer_dialog(context: Any) -> None:
             window.refresh_analysis()
         return
 
+    global _open_dialog
     dialog = HomodesmoticAnalyzerDialog(context)
+    _open_dialog = dialog
     context.register_window(WINDOW_ID, dialog)
     dialog.show()

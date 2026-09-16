@@ -182,6 +182,9 @@ def _install_qt_stubs():
         def close(self):
             pass
 
+        def closeEvent(self, event):
+            pass
+
     class _QLabel(_QBase):
         def __init__(self, text="", *args, **kwargs):
             super().__init__(*args, **kwargs)
@@ -640,3 +643,29 @@ def _install_qt_stubs():
 
 
 _install_qt_stubs()
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _clean_session():
+    """Isolate the plugin's module-level session state.
+
+    Entries survive closing the dialog on purpose, which is what lets a
+    project file restore them; without this, one test's species would seed
+    the next test's dialog.
+    """
+    try:
+        from strain_homodesmotic_reaction_generator import ui
+    except Exception:  # pragma: no cover - collection without RDKit
+        yield
+        return
+
+    def clear():
+        ui._open_dialog = None
+        ui.reset_session_state()
+
+    clear()
+    yield
+    clear()
