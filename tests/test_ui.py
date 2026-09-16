@@ -243,12 +243,13 @@ def test_populate_table_includes_left_and_right_balance_terms():
     dialog._populate_table(result)
 
     assert dialog.table.rowCount() == 3
-    assert dialog.table.item(0, 0).text() == "Ref: match"
-    assert dialog.table.item(1, 0).text() == "Left Balance: left term"
-    assert dialog.table.item(2, 0).text() == "Right Balance: right term"
+    roles = [dialog.table.item(row, ui._COL_ROLE).text() for row in range(3)]
+    names = [dialog.table.item(row, ui._COL_NAME).text() for row in range(3)]
+    assert roles == ["Reference", "Left balance", "Right balance"]
+    assert names == ["match", "left term", "right term"]
     # Load Species buttons were attached to every row.
     for row in range(3):
-        assert dialog.table.cellWidget(row, 3) is not None
+        assert dialog.table.cellWidget(row, ui._COL_ACTION) is not None
 
 
 def test_populate_table_skips_zero_count_terms():

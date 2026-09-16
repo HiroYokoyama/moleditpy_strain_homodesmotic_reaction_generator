@@ -9,6 +9,7 @@ Add Species dialog and the re-orderable results table.
 from collections import Counter
 from pathlib import Path
 import sys
+import time
 
 import pytest
 
@@ -71,6 +72,23 @@ def _dialog(smiles=CYCLOPROPANE):
 
 def _equation(result):
     return result.equation_text.splitlines()[3]
+
+
+def _apply(dialog, *entries):
+    """Stage entries the way the dialogs do, then run the analysis."""
+    for entry in entries:
+        dialog.apply_new_entry(entry)
+    dialog.refresh_analysis()
+    return dialog
+
+
+def _row_index(dialog, smiles):
+    """Index of the one row carrying this SMILES."""
+    return next(
+        index
+        for index, data in enumerate(dialog._table_rows)
+        if data["smiles"] == smiles
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +182,7 @@ def test_a_workable_override_does_not_report_a_cancellation():
 
 
 def test_a_cancelled_reference_raises_the_warning_label():
-    dialog = _dialog()
-    dialog.apply_new_entry(("reference", CP_ENVIRONMENT, "c1ccccc1"))
+    dialog = _apply(_dialog(), ("reference", CP_ENVIRONMENT, "c1ccccc1"))
     assert dialog.warning_label.isVisible() is True
     assert "cancelled out" in dialog.warning_label.text()
 
@@ -255,6 +272,27 @@ def test_an_impossible_requirement_is_dropped_and_reported():
     assert result.reaction_type == "Hyperhomodesmotic"
 
 
+@pytest.mark.skipif(core.milp is None, reason="SciPy is required for the MILP path")
+@pytest.mark.parametrize(
+    "order",
+    [("CCCCCCC", "[SiH4]"), ("[SiH4]", "CCCCCCC")],
+    ids=["possible-first", "impossible-first"],
+)
+def test_only_the_impossible_requirement_is_dropped(order):
+    """One unsatisfiable requirement must not take a workable one down with it."""
+    mol = Chem.MolFromSmiles(CYCLOPROPANE)
+    result = analyze_molecule(
+        mol, user_species=[UserSpecies(smiles, "", True) for smiles in order]
+    )
+    assert result.unmet_required == ("[SiH4]",)
+    used = {
+        term.smiles
+        for term in result.left_balance_terms + result.right_balance_terms
+        if term.count > 0
+    }
+    assert "CCCCCCC" in used
+
+
 def test_user_terms_are_flagged_so_the_report_can_mark_them():
     mol = Chem.MolFromSmiles(CYCLOPROPANE)
     result = analyze_molecule(
@@ -268,15 +306,81 @@ def test_user_terms_are_flagged_so_the_report_can_mark_them():
     assert flagged and all(term.user_defined for term in flagged)
 
 
-def test_too_many_required_species_are_reported_rather_than_searched():
-    required = [f"C{'C' * n}" for n in range(core._MAX_REQUIRED_SEARCH + 1)]
-    left, right, ok, unmet = build_hyperhomodesmotic_balance_terms(
-        Counter({"C(H3)(O_s0)(O_d0)(N_s0)(N_d0)(N_t0)(=C0)(#C0)": 2}),
-        Counter({"C": 2, "H": 6}),
-        tuple(UserSpecies(smiles).as_balance_species() for smiles in required),
-        tuple(required),
+@pytest.mark.skipif(core.milp is None, reason="SciPy is required for the MILP path")
+def test_many_required_species_stay_one_solve_not_two_to_the_n():
+    """Side choice is a binary per species, so seven cost about what one does."""
+    mol = Chem.MolFromSmiles(CYCLOPROPANE)
+    species = [UserSpecies("C" * (n + 1), f"s{n}", True) for n in range(7)]
+
+    start = time.perf_counter()
+    result = analyze_molecule(mol, user_species=species)
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 10
+    used = {
+        term.smiles
+        for term in result.left_balance_terms + result.right_balance_terms
+        if term.count > 0
+    }
+    honoured = [
+        entry.smiles for entry in species if entry.smiles not in result.unmet_required
+    ]
+    assert honoured
+    assert all(smiles in used for smiles in honoured)
+
+
+@pytest.mark.skipif(core.milp is None, reason="SciPy is required for the MILP path")
+def test_a_reference_is_never_cancelled_away_to_make_the_balance_cheaper():
+    """The cheapest balance can erase the references; that answer is useless."""
+    mol = Chem.MolFromSmiles(CYCLOPROPANE)
+    result = analyze_molecule(
+        mol, user_species=[UserSpecies("CCCCCCC", "heptane", required=True)]
     )
-    assert set(required).issubset(set(unmet)) or ok is False
+    assert result.cancelled_references == ()
+    assert [match.count for match in result.matches if match.count > 0] == [3]
+
+
+#: A shortfall only ethane on the left can cover with one molecule.
+_ETHANE_GROUP = "C(H3)(O_s0)(O_d0)(N_s0)(N_d0)(N_t0)(=C0)(#C0)"
+
+
+@pytest.mark.skipif(core.milp is None, reason="SciPy is required for the MILP path")
+def test_naming_a_reference_keeps_it_off_the_left():
+    group_delta = Counter({_ETHANE_GROUP: 2})
+    atom_delta = Counter({"C": 2, "H": 6})
+
+    free, _r, _ok, _u = build_hyperhomodesmotic_balance_terms(
+        group_delta, atom_delta, (), (), ()
+    )
+    guarded, _r2, _ok2, _u2 = build_hyperhomodesmotic_balance_terms(
+        group_delta, atom_delta, (), (), ("CC",)
+    )
+    assert [term.smiles for term in free] == ["CC"]
+    assert "CC" not in [term.smiles for term in guarded]
+
+
+@pytest.mark.skipif(core.milp is None, reason="SciPy is required for the MILP path")
+def test_protecting_the_references_is_relaxed_rather_than_failing(monkeypatch):
+    """With the ban unsatisfiable, a cancelled answer still beats no answer."""
+    real = core._solve_with_required
+    attempts = []
+
+    def only_without_the_ban(*args, **kwargs):
+        banned = args[5] if len(args) > 5 else kwargs.get("banned_left_rows", ())
+        attempts.append(tuple(banned))
+        if banned:
+            return None
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(core, "_solve_with_required", only_without_the_ban)
+
+    left, right, ok, _unmet = build_hyperhomodesmotic_balance_terms(
+        Counter({_ETHANE_GROUP: 2}), Counter({"C": 2, "H": 6}), (), (), ("CC",)
+    )
+    assert ok is True
+    assert [term.smiles for term in left] == ["CC"]
+    assert right == ()
+    assert attempts[0] and not attempts[-1]
 
 
 # ---------------------------------------------------------------------------
@@ -463,22 +567,29 @@ def test_dialog_starts_with_no_user_input():
     dialog = _dialog()
     assert dialog.user_species == []
     assert dialog.reference_overrides == {}
-    assert dialog.user_table.rowCount() == 0
+    assert all(row["source"] == "default" for row in dialog._table_rows)
 
 
-def test_adding_a_balance_entry_reanalyzes_with_it():
+def test_adding_a_balance_entry_stages_it_then_analyze_applies_it():
     dialog = _dialog()
-    dialog.apply_new_entry(
-        ("balance", UserSpecies("CCCCCCC", "my heptane", required=True))
-    )
-    assert dialog.user_table.rowCount() == 1
+    entry = ("balance", UserSpecies("CCCCCCC", "my heptane", required=True))
+
+    dialog.apply_new_entry(entry)
+    assert dialog.last_result.user_species == ()
+    assert any(row["source"] == ui._SOURCE_PENDING for row in dialog._table_rows)
+
+    dialog.refresh_analysis()
     assert dialog.last_result.user_species[0].smiles == "CCCCCCC"
+    assert any(row["source"] == ui._SOURCE_YOURS for row in dialog._table_rows)
 
 
-def test_adding_a_reference_entry_reanalyzes_with_it():
+def test_adding_a_reference_entry_stages_it_then_analyze_applies_it():
     dialog = _dialog()
     dialog.apply_new_entry(("reference", CP_ENVIRONMENT, "CCCCC"))
     assert dialog.reference_overrides == {CP_ENVIRONMENT: "CCCCC"}
+    assert dialog.last_result.reference_overrides == ()
+
+    dialog.refresh_analysis()
     assert dialog.last_result.reference_overrides == ((CP_ENVIRONMENT, "CCCCC"),)
 
 
@@ -501,85 +612,231 @@ def test_environment_names_fall_back_to_every_rule_with_no_molecule():
     assert len(dialog._environment_names()) > 1
 
 
-def test_no_results_cell_is_editable():
-    """The results table reports the solver's answer; edits belong below it."""
+def test_no_cell_is_editable():
+    """The table reports the draft; changes go through Add and Edit."""
     import PyQt6.QtCore as qtc
 
     dialog = _dialog()
+    dialog.apply_new_entry(("balance", UserSpecies("CCCCCCC", "heptane")))
+    dialog.apply_new_entry(("reference", CP_ENVIRONMENT, "CCCCC"))
     editable = qtc.Qt.ItemFlag.ItemIsEditable
     assert dialog.table.rowCount() > 0
     for row in range(dialog.table.rowCount()):
-        for col in range(3):
+        for col in range(ui._COL_ACTION):
             assert not dialog.table.item(row, col).flags() & editable
 
 
-def test_a_reference_row_points_at_the_override_route():
+def test_there_is_only_one_table():
+    # The Qt stub auto-mocks unknown attributes, so hasattr proves nothing.
     dialog = _dialog()
-    row = next(
-        index
-        for index, data in enumerate(dialog._table_rows)
-        if data["kind"] == ui._KIND_REFERENCE
+    assert "user_table" not in dialog.__dict__
+
+
+def test_edit_dialog_starts_filled_in_from_a_balance_entry():
+    dialog = ui.AddSpeciesDialog(
+        None, (), ("balance", UserSpecies("CCCCCCC", "my heptane", True))
     )
-    assert "Reference molecule override" in dialog.table.item(row, 2).toolTip()
+    assert dialog.smiles_edit.text() == "CCCCCCC"
+    assert dialog.name_edit.text() == "my heptane"
+    assert dialog.required_check.isChecked() is True
+    assert dialog.type_combo.currentText() == ui._ADD_BALANCE
 
 
-def test_a_balance_row_points_at_the_species_box():
-    dialog = _dialog()
-    row = next(
-        index
-        for index, data in enumerate(dialog._table_rows)
-        if data["kind"] != ui._KIND_REFERENCE
+def test_edit_dialog_starts_filled_in_from_a_reference_entry():
+    dialog = ui.AddSpeciesDialog(
+        None, ("an environment",), ("reference", "an environment", "CCCCC")
     )
-    assert "Add your own below" in dialog.table.item(row, 2).toolTip()
+    assert dialog.type_combo.currentText() == ui._ADD_REFERENCE
+    assert dialog.environment_combo.currentText() == "an environment"
+    assert dialog.smiles_edit.text() == "CCCCC"
 
 
-def test_editing_a_user_table_smiles_updates_the_species():
+def test_edit_dialog_offers_an_environment_that_is_no_longer_detected():
+    """Editing must not silently retarget an override at some other environment."""
+    dialog = ui.AddSpeciesDialog(
+        None, ("another environment",), ("reference", "gone", "CCCCC")
+    )
+    assert dialog.environment_combo.currentText() == "gone"
+
+
+def test_edit_dialog_says_save_and_locks_the_type():
+    dialog = ui.AddSpeciesDialog(None, (), ("balance", UserSpecies("CC")))
+    assert dialog.add_button._text == "Save"
+    assert dialog.type_combo.isEnabled() is False
+
+
+def test_editing_a_species_smiles_replaces_the_old_entry():
     dialog = _dialog()
-    dialog.apply_new_entry(("balance", UserSpecies("CCCCCCC", "heptane")))
-    dialog.user_table.item(0, 2).setText("CCCCCC")
+    old = ("balance", UserSpecies("CCCCCCC", "heptane"))
+    dialog.apply_new_entry(old)
+    dialog.apply_new_entry(("balance", UserSpecies("CCCCCC", "hexane")), replacing=old)
     assert [species.smiles for species in dialog.user_species] == ["CCCCCC"]
+    assert not any(row["smiles"] == "CCCCCCC" for row in dialog._table_rows)
 
 
-def test_editing_a_user_table_name_updates_the_label():
+def test_editing_a_species_name_only_keeps_one_entry():
     dialog = _dialog()
-    dialog.apply_new_entry(("balance", UserSpecies("CCCCCCC", "heptane")))
-    dialog.user_table.item(0, 1).setText("renamed")
+    old = ("balance", UserSpecies("CCCCCCC", "heptane"))
+    dialog.apply_new_entry(old)
+    dialog.apply_new_entry(
+        ("balance", UserSpecies("CCCCCCC", "renamed")), replacing=old
+    )
+    assert len(dialog.user_species) == 1
     assert dialog.user_species[0].name == "renamed"
 
 
-def test_editing_a_user_table_override_smiles_updates_the_override():
+def test_editing_an_override_onto_another_environment_drops_the_old_one():
     dialog = _dialog()
-    dialog.apply_new_entry(("reference", CP_ENVIRONMENT, "CCCCC"))
-    dialog.user_table.item(0, 2).setText("CCCCCC")
-    assert dialog.reference_overrides == {CP_ENVIRONMENT: "CCCCCC"}
+    old = ("reference", CP_ENVIRONMENT, "CCCCC")
+    dialog.apply_new_entry(old)
+    dialog.apply_new_entry(("reference", "somewhere else", "CCCCCC"), replacing=old)
+    assert dialog.reference_overrides == {"somewhere else": "CCCCCC"}
 
 
-def test_editing_a_user_table_smiles_to_rubbish_warns_and_reverts():
-    import PyQt6.QtWidgets as qtw
+def test_an_edited_species_is_still_marked_as_the_users():
+    """Editing onto a SMILES the library already has must not lose the mark."""
+    dialog = _dialog()
+    old = ("balance", UserSpecies("CCCCCCC", "heptane", required=True))
+    dialog.apply_new_entry(old)
+    dialog.apply_new_entry(
+        ("balance", UserSpecies("CCCCCC", "hexane", required=True)), replacing=old
+    )
+    dialog.refresh_analysis()
+    terms = [
+        term
+        for term in dialog.last_result.left_balance_terms
+        + dialog.last_result.right_balance_terms
+        if term.smiles == "CCCCCC" and term.count > 0
+    ]
+    assert terms and all(term.user_defined for term in terms)
 
+
+def test_selecting_a_user_row_yields_that_entry():
     dialog = _dialog()
     dialog.apply_new_entry(("balance", UserSpecies("CCCCCCC", "heptane")))
-    qtw.QMessageBox.warning_calls.clear()
-    dialog.user_table.item(0, 2).setText("not-a-molecule")
-    assert [species.smiles for species in dialog.user_species] == ["CCCCCCC"]
-    assert qtw.QMessageBox.warning_calls
+    dialog.table.selectRows([_row_index(dialog, "CCCCCCC")])
+    kind, species = dialog._selected_row()["edit_entry"]
+    assert kind == "balance"
+    assert species.smiles == "CCCCCCC"
+
+
+def test_selecting_a_reference_row_yields_a_reference_entry():
+    dialog = _dialog()
+    dialog.table.selectRows([_row_index(dialog, CP_DEFAULT_REFERENCE)])
+    assert dialog._selected_row()["edit_entry"] == (
+        "reference",
+        CP_ENVIRONMENT,
+        CP_DEFAULT_REFERENCE,
+    )
+
+
+def test_a_default_reference_can_be_edited_but_not_removed():
+    dialog = _dialog()
+    row = dialog._table_rows[_row_index(dialog, CP_DEFAULT_REFERENCE)]
+    assert row["edit_entry"] is not None
+    assert row["removable"] is False
+
+
+def test_a_solver_chosen_balance_species_can_be_neither():
+    dialog = _dialog()
+    row = next(
+        data
+        for data in dialog._table_rows
+        if data["role"] in (ui._ROLE_LEFT, ui._ROLE_RIGHT)
+    )
+    assert row["edit_entry"] is None
+    assert row["removable"] is False
+
+
+def test_editing_a_solver_row_says_why_it_cannot():
+    dialog = _dialog()
+    row = next(
+        index
+        for index, data in enumerate(dialog._table_rows)
+        if data["role"] in (ui._ROLE_LEFT, ui._ROLE_RIGHT)
+    )
+    dialog.table.selectRows([row])
+    dialog.edit_selected_species()
+    assert any(
+        "can be edited" in message
+        for message, _timeout in dialog.context.status_messages
+    )
+
+
+def test_removing_a_solver_row_says_why_it_cannot():
+    dialog = _dialog()
+    row = next(
+        index
+        for index, data in enumerate(dialog._table_rows)
+        if data["role"] in (ui._ROLE_LEFT, ui._ROLE_RIGHT)
+    )
+    dialog.table.selectRows([row])
+    dialog.remove_selected_species()
+    assert any(
+        "can be removed" in message
+        for message, _timeout in dialog.context.status_messages
+    )
+
+
+def test_double_clicking_a_row_opens_its_edit_dialog(monkeypatch):
+    opened = []
+
+    class _Dialog:
+        entry = None
+
+        def __init__(self, parent, environments, existing=None):
+            opened.append(existing)
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr(ui, "AddSpeciesDialog", _Dialog)
+    dialog = _dialog()
+    row = _row_index(dialog, CP_DEFAULT_REFERENCE)
+    dialog.table.doubleClick(row)
+    assert opened == [("reference", CP_ENVIRONMENT, CP_DEFAULT_REFERENCE)]
+
+
+def test_double_clicking_selects_the_row_it_was_given():
+    dialog = _dialog()
+    row = _row_index(dialog, CP_DEFAULT_REFERENCE)
+    dialog.table.doubleClick(row)
+    assert dialog._selected_row()["smiles"] == CP_DEFAULT_REFERENCE
+
+
+def test_editing_needs_exactly_one_selected_row():
+    dialog = _dialog()
+    dialog.table.selectRows([0, 1])
+    dialog.edit_selected_species()
+    assert "Select one row to edit." in [
+        message for message, _timeout in dialog.context.status_messages
+    ]
+
+
+def test_editing_with_nothing_selected_says_so():
+    dialog = _dialog()
+    dialog.edit_selected_species()
+    assert "Select one row to edit." in [
+        message for message, _timeout in dialog.context.status_messages
+    ]
 
 
 def test_removing_a_selected_species_reanalyzes_without_it():
     dialog = _dialog()
     dialog.apply_new_entry(("balance", UserSpecies("CCCCCCC", "heptane")))
-    dialog.user_table.selectRows([0])
+    dialog.table.selectRows([_row_index(dialog, "CCCCCCC")])
     dialog.remove_selected_species()
     assert dialog.user_species == []
-    assert dialog.user_table.rowCount() == 0
+    assert not any(row["smiles"] == "CCCCCCC" for row in dialog._table_rows)
 
 
-def test_removing_a_selected_override_reanalyzes_without_it():
+def test_removing_a_selected_override_reverts_to_the_default_reference():
     dialog = _dialog()
     dialog.apply_new_entry(("reference", CP_ENVIRONMENT, "CCCCC"))
-    dialog.user_table.selectRows([0])
+    dialog.table.selectRows([_row_index(dialog, "CCCCC")])
     dialog.remove_selected_species()
     assert dialog.reference_overrides == {}
+    assert _row_index(dialog, CP_DEFAULT_REFERENCE) is not None
 
 
 def test_removing_with_nothing_selected_says_so():
@@ -587,7 +844,7 @@ def test_removing_with_nothing_selected_says_so():
     dialog.apply_new_entry(("balance", UserSpecies("CCCCCCC")))
     dialog.remove_selected_species()
     assert dialog.user_species
-    assert "Select a row to remove." in [
+    assert "Select one row to remove." in [
         message for message, _timeout in dialog.context.status_messages
     ]
 
@@ -599,7 +856,7 @@ def test_reset_clears_both_kinds_of_entry():
     dialog.reset_species()
     assert dialog.user_species == []
     assert dialog.reference_overrides == {}
-    assert dialog.user_table.rowCount() == 0
+    assert all(row["source"] == "default" for row in dialog._table_rows)
 
 
 def test_reset_with_nothing_to_clear_is_a_no_op():
@@ -611,8 +868,9 @@ def test_reset_with_nothing_to_clear_is_a_no_op():
 
 @pytest.mark.skipif(core.milp is None, reason="SciPy is required for the MILP path")
 def test_an_impossible_requirement_raises_the_warning_label():
-    dialog = _dialog()
-    dialog.apply_new_entry(("balance", UserSpecies("[SiH4]", "silane", required=True)))
+    dialog = _apply(
+        _dialog(), ("balance", UserSpecies("[SiH4]", "silane", required=True))
+    )
     assert dialog.warning_label.isVisible() is True
     assert "[SiH4]" in dialog.warning_label.text()
 
@@ -629,61 +887,201 @@ def test_the_warning_label_clears_once_the_requirement_is_removed():
 # ---------------------------------------------------------------------------
 
 
-def test_rows_are_grouped_reference_then_left_then_right_by_default():
+def test_rows_are_grouped_reference_then_balance_then_unused_by_default():
     dialog = _dialog()
-    kinds = [data["kind"] for data in dialog._table_rows]
-    assert kinds == sorted(kinds)
+    dialog.apply_new_entry(("balance", UserSpecies("[SiH4]", "silane")))
+    roles = [data["role"] for data in dialog._table_rows]
+    assert roles == sorted(roles)
+    assert roles[-1] == ui._ROLE_UNUSED
 
 
 def test_clicking_a_header_sorts_then_reverses_then_restores_the_grouping():
     dialog = _dialog()
-    grouped = [data["label"] for data in dialog._table_rows]
+    grouped = [data["name"] for data in dialog._table_rows]
 
-    dialog._on_header_clicked(2)
+    dialog._on_header_clicked(ui._COL_SMILES)
     ascending = [data["smiles"] for data in dialog._table_rows]
     assert ascending == sorted(ascending)
 
-    dialog._on_header_clicked(2)
+    dialog._on_header_clicked(ui._COL_SMILES)
     descending = [data["smiles"] for data in dialog._table_rows]
     assert descending == sorted(descending, reverse=True)
 
-    dialog._on_header_clicked(2)
-    assert [data["label"] for data in dialog._table_rows] == grouped
+    dialog._on_header_clicked(ui._COL_SMILES)
+    assert [data["name"] for data in dialog._table_rows] == grouped
 
 
 def test_sorting_by_count_orders_by_count():
     dialog = _dialog()
-    dialog._on_header_clicked(1)
+    dialog._on_header_clicked(ui._COL_COUNT)
     counts = [data["count"] for data in dialog._table_rows]
     assert counts == sorted(counts)
 
 
-def test_sorting_by_environment_orders_by_label():
+def test_sorting_by_count_does_not_trip_over_a_row_with_no_count():
     dialog = _dialog()
-    dialog._on_header_clicked(0)
-    labels = [data["label"] for data in dialog._table_rows]
-    assert labels == sorted(labels)
+    dialog.apply_new_entry(("balance", UserSpecies("[SiH4]", "silane")))
+    dialog._on_header_clicked(ui._COL_COUNT)
+    assert dialog._table_rows[0]["count"] is None
+
+
+def test_sorting_by_name_orders_by_name():
+    dialog = _dialog()
+    dialog._on_header_clicked(ui._COL_NAME)
+    names = [data["name"] for data in dialog._table_rows]
+    assert names == sorted(names)
+
+
+def test_sorting_by_source_orders_by_source():
+    dialog = _dialog()
+    dialog.apply_new_entry(("balance", UserSpecies("CCCCCCC", "heptane")))
+    dialog._on_header_clicked(ui._COL_SOURCE)
+    sources = [data["source"] for data in dialog._table_rows]
+    assert sources == sorted(sources)
 
 
 def test_clicking_the_action_header_does_nothing():
     dialog = _dialog()
-    before = [data["label"] for data in dialog._table_rows]
-    dialog._on_header_clicked(3)
+    before = [data["name"] for data in dialog._table_rows]
+    dialog._on_header_clicked(ui._COL_ACTION)
     assert dialog._sort_state is None
-    assert [data["label"] for data in dialog._table_rows] == before
+    assert [data["name"] for data in dialog._table_rows] == before
 
 
 def test_switching_sort_column_starts_ascending_again():
     dialog = _dialog()
-    dialog._on_header_clicked(2)
-    dialog._on_header_clicked(2)
-    dialog._on_header_clicked(1)
-    assert dialog._sort_state == (1, False)
+    dialog._on_header_clicked(ui._COL_SMILES)
+    dialog._on_header_clicked(ui._COL_SMILES)
+    dialog._on_header_clicked(ui._COL_COUNT)
+    assert dialog._sort_state == (ui._COL_COUNT, False)
 
 
 def test_a_sorted_table_keeps_its_load_buttons_aligned_with_its_rows():
     dialog = _dialog()
-    dialog._on_header_clicked(2)
+    dialog._on_header_clicked(ui._COL_SMILES)
     for row, data in enumerate(dialog._table_rows):
-        assert dialog.table.item(row, 2).text() == data["smiles"]
-        assert dialog.table.cellWidget(row, 3) is not None
+        assert dialog.table.item(row, ui._COL_SMILES).text() == data["smiles"]
+        assert dialog.table.cellWidget(row, ui._COL_ACTION) is not None
+
+
+# ---------------------------------------------------------------------------
+# Staged changes
+# ---------------------------------------------------------------------------
+
+
+def test_nothing_is_pending_to_begin_with():
+    dialog = _dialog()
+    assert dialog.pending_label.isVisible() is False
+
+
+def test_a_staged_change_raises_the_pending_banner():
+    """A full re-analysis is seconds of modal wait; edits must not each cost one."""
+    dialog = _dialog()
+    dialog.apply_new_entry(("balance", UserSpecies("CCCCCCC", "heptane")))
+    assert dialog.pending_label.isVisible() is True
+    assert "1 change pending" in dialog.pending_label.text()
+
+
+def test_the_banner_counts_several_staged_changes():
+    dialog = _dialog()
+    dialog.apply_new_entry(("balance", UserSpecies("CCCCCCC")))
+    dialog.apply_new_entry(("reference", CP_ENVIRONMENT, "CCCCC"))
+    assert "2 changes pending" in dialog.pending_label.text()
+
+
+def test_analyzing_clears_the_pending_banner():
+    dialog = _apply(_dialog(), ("balance", UserSpecies("CCCCCCC", "heptane")))
+    assert dialog.pending_label.isVisible() is False
+
+
+def test_a_staged_override_shows_on_the_reference_row_as_pending():
+    dialog = _dialog()
+    dialog.apply_new_entry(("reference", CP_ENVIRONMENT, "CCCCC"))
+    row = dialog._table_rows[_row_index(dialog, "CCCCC")]
+    assert row["role"] == ui._ROLE_REFERENCE
+    assert row["source"] == ui._SOURCE_PENDING
+
+
+def test_removing_an_applied_override_is_pending_until_analyzed():
+    dialog = _apply(_dialog(), ("reference", CP_ENVIRONMENT, "CCCCC"))
+    dialog.table.selectRows([_row_index(dialog, "CCCCC")])
+    dialog.remove_selected_species()
+    row = dialog._table_rows[_row_index(dialog, CP_DEFAULT_REFERENCE)]
+    assert row["source"] == ui._SOURCE_REMOVED
+
+    dialog.refresh_analysis()
+    row = dialog._table_rows[_row_index(dialog, CP_DEFAULT_REFERENCE)]
+    assert row["source"] == "default"
+
+
+def test_removing_an_applied_species_is_pending_until_analyzed():
+    dialog = _apply(
+        _dialog(), ("balance", UserSpecies("CCCCCCC", "heptane", required=True))
+    )
+    dialog.table.selectRows([_row_index(dialog, "CCCCCCC")])
+    dialog.remove_selected_species()
+    assert any(row["source"] == ui._SOURCE_REMOVED for row in dialog._table_rows)
+
+    dialog.refresh_analysis()
+    assert not any(row["smiles"] == "CCCCCCC" for row in dialog._table_rows)
+
+
+def test_reset_is_pending_until_analyzed():
+    dialog = _apply(_dialog(), ("balance", UserSpecies("CCCCCCC", "heptane")))
+    dialog.reset_species()
+    assert dialog.pending_label.isVisible() is True
+    dialog.refresh_analysis()
+    assert dialog.pending_label.isVisible() is False
+
+
+def test_the_analyze_button_is_not_named_after_the_molecule():
+    """ "Analyze Current Molecule" read as though it would discard your entries."""
+    dialog = _dialog()
+    assert dialog.analyze_button._text == "Analyze"
+
+
+# ---------------------------------------------------------------------------
+# Entries the equation does not contain
+# ---------------------------------------------------------------------------
+
+
+def test_an_unused_species_still_gets_a_row():
+    """Otherwise the entry is invisible and cannot be edited or removed."""
+    dialog = _apply(_dialog(), ("balance", UserSpecies("[SiH4]", "silane")))
+    row = dialog._table_rows[_row_index(dialog, "[SiH4]")]
+    assert row["role"] == ui._ROLE_UNUSED
+    assert row["source"] == ui._SOURCE_NOT_USED
+    assert row["count"] is None
+    assert row["removable"] is True
+
+
+@pytest.mark.skipif(core.milp is None, reason="SciPy is required for the MILP path")
+def test_an_unplaceable_required_species_says_so_in_its_row():
+    dialog = _apply(
+        _dialog(), ("balance", UserSpecies("[SiH4]", "silane", required=True))
+    )
+    row = dialog._table_rows[_row_index(dialog, "[SiH4]")]
+    assert row["source"] == ui._SOURCE_UNPLACEABLE
+
+
+def test_a_cancelled_override_keeps_a_row_saying_so():
+    dialog = _apply(_dialog(), ("reference", CP_ENVIRONMENT, "c1ccccc1"))
+    row = dialog._table_rows[_row_index(dialog, "c1ccccc1")]
+    assert row["source"] == ui._SOURCE_CANCELLED
+    assert row["removable"] is True
+
+
+def test_an_override_for_an_undetected_environment_says_so():
+    dialog = _apply(
+        _dialog(), ("reference", "primary carbon - primary carbon", "CCCCC")
+    )
+    row = dialog._table_rows[_row_index(dialog, "CCCCC")]
+    assert row["source"] == ui._SOURCE_NO_ENVIRONMENT
+
+
+def test_an_unused_species_can_be_removed_from_its_row():
+    dialog = _dialog()
+    dialog.apply_new_entry(("balance", UserSpecies("[SiH4]", "silane")))
+    dialog.table.selectRows([_row_index(dialog, "[SiH4]")])
+    dialog.remove_selected_species()
+    assert dialog.user_species == []

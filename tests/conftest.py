@@ -322,6 +322,7 @@ def _install_qt_stubs():
             self._h_header = _QHeader()
             self._v_header = _QHeader()
             self.itemChanged = _BoundSignal()
+            self.itemDoubleClicked = _BoundSignal()
 
         def horizontalHeader(self):
             return self._h_header
@@ -335,6 +336,19 @@ def _install_qt_stubs():
         def selectRows(self, rows):
             """Test helper: pretend the user selected these rows."""
             self._selected = [(row, 0) for row in rows]
+
+        def selectRow(self, row):
+            self._selected = [(row, 0)]
+
+        def doubleClick(self, row, col=0):
+            """Test helper: emit itemDoubleClicked for a cell."""
+            self.itemDoubleClicked.emit(self._items[(row, col)])
+
+        def setSelectionBehavior(self, behavior):
+            self._selection_behavior = behavior
+
+        def setSelectionMode(self, mode):
+            self._selection_mode = mode
 
         def _emit_item_changed(self, item):
             self.itemChanged.emit(item)
@@ -357,6 +371,10 @@ def _install_qt_stubs():
 
         def setHorizontalHeaderLabels(self, labels):
             self._header_labels = list(labels)
+
+        def clearContents(self):
+            self._items.clear()
+            self._cell_widgets.clear()
 
         def setItem(self, row, col, item):
             self._items[(row, col)] = item
@@ -435,6 +453,13 @@ def _install_qt_stubs():
             Stretch = 1
             ResizeToContents = 2
 
+    class _QAbstractItemView:
+        class SelectionBehavior:
+            SelectRows = 1
+
+        class SelectionMode:
+            SingleSelection = 1
+
     class _QGroupBox(_QBase):
         def __init__(self, title="", *args, **kwargs):
             super().__init__(*args, **kwargs)
@@ -499,6 +524,12 @@ def _install_qt_stubs():
         def addItem(self, text):
             self._items.append(text)
 
+        def setEnabled(self, enabled):
+            self._enabled = enabled
+
+        def isEnabled(self):
+            return getattr(self, "_enabled", True)
+
         def count(self):
             return len(self._items)
 
@@ -542,6 +573,7 @@ def _install_qt_stubs():
     qt_core.QObject = _QObject
 
     qt_widgets = types.ModuleType("PyQt6.QtWidgets")
+    qt_widgets.QAbstractItemView = _QAbstractItemView
     qt_widgets.QCheckBox = _QCheckBox
     qt_widgets.QComboBox = _QComboBox
     qt_widgets.QDialog = _QDialog

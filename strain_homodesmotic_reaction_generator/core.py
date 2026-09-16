@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import csv
 import html
-import itertools
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
@@ -543,7 +542,11 @@ def analyze_molecule(
     if milp is not None and np is not None:
         left_balance_terms, right_balance_terms, milp_success, unmet_required = (
             build_hyperhomodesmotic_balance_terms(
-                group_delta, atom_delta, extra_species, required_smiles
+                group_delta,
+                atom_delta,
+                extra_species,
+                required_smiles,
+                tuple(term.smiles for term in rhs_terms),
             )
         )
 
@@ -957,6 +960,7 @@ def build_hyperhomodesmotic_balance_terms(
     atom_delta: Counter[str] | None = None,
     extra_species: Sequence[BalanceSpecies] = (),
     required_smiles: Sequence[str] = (),
+    reference_smiles: Sequence[str] = (),
 ) -> tuple[tuple[BalanceTerm, ...], tuple[BalanceTerm, ...], bool, tuple[str, ...]]:
     """Solve for a perfectly balanced hyperhomodesmotic reaction using MILP.
 
@@ -968,7 +972,9 @@ def build_hyperhomodesmotic_balance_terms(
     tetramethylsilane to one side.
     """
     pool, user_smiles = balance_pool(extra_species)
-    required = {smiles for smiles in required_smiles if smiles}
+    # Keep the user's order: it decides which requirement yields to which when
+    # they cannot all be met.
+    required = tuple(dict.fromkeys(smiles for smiles in required_smiles if smiles))
 
     if not group_delta and not required:
         return (), (), True, ()
@@ -1021,30 +1027,59 @@ def build_hyperhomodesmotic_balance_terms(
     integrality = np.ones(2 * n_species)
     constraints = [LinearConstraint(A_eq, b_eq, b_eq)]
 
-    required_rows = [
-        j
-        for j, (species, _g, _a) in enumerate(species_list)
-        if species.smiles in required
-    ]
-    unplaceable = tuple(
-        smiles
-        for smiles in required
-        if smiles not in {species.smiles for species, _g, _a in species_list}
-    )
+    row_of = {species.smiles: j for j, (species, _g, _a) in enumerate(species_list)}
+    required_rows = [row_of[smiles] for smiles in required if smiles in row_of]
+    unplaceable = tuple(smiles for smiles in required if smiles not in row_of)
 
-    res = _solve_with_required(c, constraints, integrality, n_species, required_rows)
-    unmet: tuple[str, ...] = unplaceable
-    if res is None and required_rows:
-        # The requirement is what made it infeasible. A good balance the user
-        # cannot have is still worth more than no balance at all, so drop the
-        # requirement and say so rather than falling back to elemental mode.
-        res = _solve_with_required(c, constraints, integrality, n_species, [])
-        unmet = unplaceable + tuple(species_list[j][0].smiles for j in required_rows)
+    # A reference molecule added to the left just cancels the copies on the
+    # right, and the cancellation pass then erases both. That is often the
+    # cheapest solution and always a useless one: it leaves a balanced equation
+    # with nothing left to say about the strained environment. Keep references
+    # off the left, and only relax it if nothing else balances at all.
+    protected = [row_of[smiles] for smiles in set(reference_smiles) if smiles in row_of]
+
+    # A requirement that cannot be met is dropped rather than failing the whole
+    # run: a good balance the user cannot have still beats no balance at all.
+    # Dropped one at a time, newest first, so a species that is fine on its own
+    # is not blamed for a later one that is not.
+    res = None
+    kept: list[int] = []
+    dropped: list[int] = []
+    for banned in (protected, ()) if protected else ((),):
+        kept = list(required_rows)
+        dropped = []
+        res = _solve_with_required(c, constraints, integrality, n_species, kept, banned)
+        while res is None and kept:
+            dropped.append(kept.pop())
+            res = _solve_with_required(
+                c, constraints, integrality, n_species, kept, banned
+            )
+        if res is None:
+            continue
+
+        # Dropping newest-first can discard a requirement that was fine on its
+        # own, so offer each dropped one back once. One extra solve each, and
+        # the answer no longer depends on the order they were added in.
+        for row in list(reversed(dropped)):
+            trial = _solve_with_required(
+                c, constraints, integrality, n_species, kept + [row], banned
+            )
+            if trial is not None:
+                kept.append(row)
+                dropped.remove(row)
+                res = trial
+        break
+
     if res is None:
         return (), (), False, unplaceable
 
+    unmet: tuple[str, ...] = unplaceable + tuple(
+        species_list[j][0].smiles for j in required_rows if j in set(dropped)
+    )
+
+    # The tail past 2*n_species holds the side-picking binaries, not counts.
     u = np.round(res.x[:n_species]).astype(int)
-    v = np.round(res.x[n_species:]).astype(int)
+    v = np.round(res.x[n_species : 2 * n_species]).astype(int)
 
     left_terms = []
     for j, count in enumerate(u):
@@ -1077,9 +1112,10 @@ def build_hyperhomodesmotic_balance_terms(
     return tuple(left_terms), tuple(right_terms), True, unmet
 
 
-#: Sides to try per required species is 2**k; past this the search is skipped
-#: and the species is reported as unmet instead of stalling the dialog.
-_MAX_REQUIRED_SEARCH = 6
+#: Upper bound on any single species count, used to switch a side on and off.
+#: Far above anything a balance needs, and small enough to keep the solver
+#: numerically comfortable.
+_SIDE_BIG_M = 10_000
 
 
 def _solve_with_required(
@@ -1088,44 +1124,70 @@ def _solve_with_required(
     integrality: Any,
     n_species: int,
     required_rows: Sequence[int],
+    banned_left_rows: Sequence[int] = (),
 ) -> Any:
     """Cheapest MILP solution, pinning each required species to one side.
 
     Asking only for "present somewhere" lets the solver put a species on both
-    sides, where it cancels out and the user sees no trace of it. Pinning each
-    required species to a single side and zeroing the other is what makes the
-    requirement mean something.
+    sides, where it cancels out and the user sees no trace of it. One binary
+    per required species picks its side instead:
+
+        u - M*(1-b) <= 0     b = 0 forces the right side empty
+        v - M*b     <= 0     b = 1 forces the left side empty
+        u + v       >= 1     and something has to be there
+
+    Choosing sides this way is one solve rather than one per assignment, so a
+    handful of required species costs no more than a single one.
     """
+    n_required = len(required_rows)
+    n_vars = 2 * n_species + n_required
 
-    def solve(bounds: Any) -> Any:
-        try:
-            res = milp(
-                c=c,
-                constraints=constraints,
-                integrality=integrality,
-                bounds=bounds,
-            )
-        except Exception:
-            return None
-        return res if res.success else None
+    def widen(constraint: Any) -> Any:
+        if n_required == 0:
+            return constraint
+        matrix = np.hstack(
+            (constraint.A, np.zeros((constraint.A.shape[0], n_required)))
+        )
+        return LinearConstraint(matrix, constraint.lb, constraint.ub)
 
-    if not required_rows:
-        return solve(None)
-    if len(required_rows) > _MAX_REQUIRED_SEARCH:
+    all_constraints = [widen(constraint) for constraint in constraints]
+
+    if n_required:
+        rows = np.zeros((3 * n_required, n_vars))
+        lb = np.empty(3 * n_required)
+        ub = np.empty(3 * n_required)
+        for t, j in enumerate(required_rows):
+            binary = 2 * n_species + t
+
+            rows[3 * t, j] = 1
+            rows[3 * t, binary] = _SIDE_BIG_M
+            lb[3 * t], ub[3 * t] = -np.inf, _SIDE_BIG_M
+
+            rows[3 * t + 1, n_species + j] = 1
+            rows[3 * t + 1, binary] = -_SIDE_BIG_M
+            lb[3 * t + 1], ub[3 * t + 1] = -np.inf, 0
+
+            rows[3 * t + 2, j] = 1
+            rows[3 * t + 2, n_species + j] = 1
+            lb[3 * t + 2], ub[3 * t + 2] = 1, np.inf
+        all_constraints.append(LinearConstraint(rows, lb, ub))
+
+    costs = np.concatenate((c, np.zeros(n_required)))
+    upper = np.concatenate((np.full(2 * n_species, np.inf), np.ones(n_required)))
+    for row in banned_left_rows:
+        upper[row] = 0
+    bounds = Bounds(np.zeros(n_vars), upper)
+
+    try:
+        res = milp(
+            c=costs,
+            constraints=all_constraints,
+            integrality=np.ones(n_vars),
+            bounds=bounds,
+        )
+    except Exception:
         return None
-
-    best = None
-    for sides in itertools.product((0, 1), repeat=len(required_rows)):
-        lb = np.zeros(2 * n_species)
-        ub = np.full(2 * n_species, np.inf)
-        for side, j in zip(sides, required_rows):
-            present, absent = (j, n_species + j) if side == 0 else (n_species + j, j)
-            lb[present] = 1
-            ub[absent] = 0
-        res = solve(Bounds(lb, ub))
-        if res is not None and (best is None or res.fun < best.fun):
-            best = res
-    return best
+    return res if res.success else None
 
 
 def build_balance_terms(
