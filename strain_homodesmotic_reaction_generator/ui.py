@@ -54,6 +54,7 @@ from .core import (
     build_equation_check_html,
     check_equation,
     export_analysis,
+    export_equation_check,
     format_equation_sides,
     is_valid_smiles,
     milp,
@@ -522,9 +523,12 @@ if QDialog is not None:
             button_row = QHBoxLayout()
             self.check_button = QPushButton("Check")
             self.check_button.setDefault(True)
+            self.export_button = QPushButton("Export Check")
+            self.export_button.setAutoDefault(False)
             self.close_button = QPushButton("Close")
             self.close_button.setAutoDefault(False)
             button_row.addWidget(self.check_button)
+            button_row.addWidget(self.export_button)
             button_row.addStretch()
             button_row.addWidget(self.close_button)
             layout.addLayout(button_row)
@@ -539,13 +543,31 @@ if QDialog is not None:
             layout.addWidget(self.result_box, 1)
 
             self.check_button.clicked.connect(self.check)
+            self.export_button.clicked.connect(self.export)
             self.close_button.clicked.connect(self.reject)
+            self.last_check = check_equation("")
             if initial:
                 self.check()
 
         def check(self) -> None:
             self.last_check = check_equation(self.input_box.toPlainText())
             self.result_box.setHtml(build_equation_check_html(self.last_check))
+
+        def export(self) -> None:
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Equation Check",
+                "equation_check.html",
+                "HTML Files (*.html);;CSV Files (*.csv);;Text Files (*.txt)",
+            )
+            if not path:
+                return
+            try:
+                export_equation_check(
+                    path, self.last_check, self.input_box.toPlainText()
+                )
+            except OSError as exc:
+                QMessageBox.critical(self, "Export Failed", str(exc))
 
     class HomodesmoticAnalyzerDialog(QDialog):
         """Qt dialog for the analyzer.

@@ -311,3 +311,106 @@ def test_enter_checks_the_equation():
     tester = ui.TestEquationDialog(None, "")
     assert tester.check_button.isDefault() is True
     assert tester.close_button.autoDefault() is False
+
+
+# ---------------------------------------------------------------------------
+# Exporting a check
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("suffix", [".html", ".csv", ".txt"])
+def test_a_check_exports_in_every_format(tmp_path, suffix):
+    from strain_homodesmotic_reaction_generator.core import export_equation_check
+
+    target = tmp_path / f"check{suffix}"
+    export_equation_check(target, check_equation(REPORT_LINE), REPORT_LINE)
+    text = target.read_text(encoding="utf-8")
+    assert "Hyperhomodesmotic" in text
+
+
+@pytest.mark.parametrize("suffix", [".html", ".csv", ".txt"])
+def test_every_exported_check_names_the_version_that_made_it(tmp_path, suffix):
+    from strain_homodesmotic_reaction_generator import PLUGIN_VERSION
+    from strain_homodesmotic_reaction_generator.core import export_equation_check
+
+    target = tmp_path / f"check{suffix}"
+    export_equation_check(target, check_equation(REPORT_LINE), REPORT_LINE)
+    assert PLUGIN_VERSION in target.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("suffix", [".html", ".csv", ".txt"])
+def test_the_draft_report_names_its_version_too(tmp_path, suffix):
+    from strain_homodesmotic_reaction_generator import PLUGIN_VERSION
+    from strain_homodesmotic_reaction_generator.core import export_analysis
+
+    target = tmp_path / f"report{suffix}"
+    export_analysis(target, analyze_molecule(Chem.MolFromSmiles(CYCLOPENTANE)))
+    assert PLUGIN_VERSION in target.read_text(encoding="utf-8")
+
+
+def test_the_html_report_footer_carries_version_date_and_the_note(tmp_path):
+    from strain_homodesmotic_reaction_generator import PLUGIN_VERSION
+    from strain_homodesmotic_reaction_generator.core import export_analysis
+
+    target = tmp_path / "report.html"
+    export_analysis(target, analyze_molecule(Chem.MolFromSmiles(CYCLOPENTANE)))
+    text = target.read_text(encoding="utf-8")
+    footer = text[text.index('class="report-footer"') :]
+    assert PLUGIN_VERSION in footer
+    assert "generated 20" in footer
+    assert core.SELF_CHECK_NOTE in footer
+
+
+def test_an_exported_check_quotes_the_equation_as_typed(tmp_path):
+    from strain_homodesmotic_reaction_generator.core import export_equation_check
+
+    typed = "C1CCCC1 + 5 CCC (propane) -> 5 CCCC"
+    target = tmp_path / "check.html"
+    export_equation_check(target, check_equation(typed), typed)
+    assert "(propane)" in target.read_text(encoding="utf-8")
+
+
+def test_an_exported_check_falls_back_to_the_parsed_equation(tmp_path):
+    from strain_homodesmotic_reaction_generator.core import export_equation_check
+
+    target = tmp_path / "check.txt"
+    export_equation_check(target, check_equation(REPORT_LINE))
+    assert "C1CCCC1 + 5 CCC -> 5 CCCC" in target.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("suffix", [".html", ".csv", ".txt"])
+def test_a_failed_check_still_exports_its_errors(tmp_path, suffix):
+    from strain_homodesmotic_reaction_generator.core import export_equation_check
+
+    target = tmp_path / f"check{suffix}"
+    export_equation_check(target, check_equation("nonsense"), "nonsense")
+    assert "No arrow found" in target.read_text(encoding="utf-8")
+
+
+def test_the_tester_offers_an_export_button():
+    tester = ui.TestEquationDialog(None, "")
+    assert tester.export_button._text == "Export Check"
+    assert tester.export_button.autoDefault() is False
+
+
+def test_the_tester_can_export_before_anything_was_checked(tmp_path):
+    """Opening the tester with no draft leaves last_check unset otherwise."""
+    import PyQt6.QtWidgets as qtw
+
+    tester = ui.TestEquationDialog(None, "")
+    target = tmp_path / "check.txt"
+    qtw.QFileDialog._next_return = (str(target), "")
+    try:
+        tester.export()
+    finally:
+        qtw.QFileDialog._next_return = ("", "")
+    assert target.read_text(encoding="utf-8")
+
+
+def test_cancelling_the_export_writes_nothing(tmp_path):
+    import PyQt6.QtWidgets as qtw
+
+    tester = ui.TestEquationDialog(None, REPORT_LINE)
+    qtw.QFileDialog._next_return = ("", "")
+    tester.export()
+    assert not list(tmp_path.iterdir())

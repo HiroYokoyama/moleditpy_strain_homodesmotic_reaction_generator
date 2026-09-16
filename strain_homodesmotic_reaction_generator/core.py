@@ -2170,6 +2170,85 @@ def build_equation_check_html(check: EquationCheck) -> str:
     )
 
 
+def export_equation_check(
+    path: str | Path,
+    check: EquationCheck,
+    equation: str = "",
+) -> None:
+    """Export a hand-checked equation as HTML, CSV, or plain text.
+
+    Same shell as the draft report, so the two sit together in a folder and
+    read the same way.
+    """
+    output_path = Path(path)
+    generated_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    written = equation.strip() or format_equation_sides(check.left, check.right)
+
+    if output_path.suffix.lower() in {".html", ".htm"}:
+        output_path.write_text(
+            _report_head("Equation Check")
+            + '        <div class="report-header">\n'
+            + "            <h1>Equation Check</h1>\n"
+            + f'            <div class="meta-info">Equation: {html.escape(written)}'
+            + "</div>\n"
+            + f'            <div class="meta-info">Generated on: {generated_date}'
+            + "</div>\n"
+            + "        </div>\n"
+            + '        <div class="card">\n'
+            + f"            {build_equation_check_html(check)}\n"
+            + "        </div>\n"
+            + _report_footer(generated_date)
+            + "    </div>\n"
+            + "</body>\n"
+            + "</html>\n",
+            encoding="utf-8",
+        )
+        return
+
+    if output_path.suffix.lower() == ".txt":
+        from . import PLUGIN_VERSION
+
+        output_path.write_text(
+            build_equation_check_text(check)
+            + f"\n\nGenerated on: {generated_date}\n"
+            + f"Strain Homodesmotic Reaction Generator v{PLUGIN_VERSION}\n",
+            encoding="utf-8",
+        )
+        return
+
+    from . import PLUGIN_VERSION
+
+    with output_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["Equation Check"])
+        writer.writerow(["Equation", written])
+        writer.writerow(["Generated on", generated_date])
+        writer.writerow(["Plugin version", PLUGIN_VERSION])
+        writer.writerow([])
+        if check.errors:
+            writer.writerow(["Errors"])
+            for error in check.errors:
+                writer.writerow([error])
+            return
+        writer.writerow(["Reaction type", check.reaction_type])
+        writer.writerow(["Atoms conserved", not check.atom_delta])
+        writer.writerow(["Groups conserved", not check.group_delta])
+        writer.writerow(["Bond types conserved", not check.bond_delta])
+        writer.writerow([])
+        writer.writerow(["Quantity", "Right minus left"])
+        for name, delta in (
+            ("Atoms", check.atom_delta),
+            ("Groups", check.group_delta),
+            ("Bond types", check.bond_delta),
+        ):
+            writer.writerow([name, format_counter(delta)])
+        writer.writerow([])
+        writer.writerow(["Left-side bond counts", format_counter(check.lhs_bonds)])
+        writer.writerow(["Right-side bond counts", format_counter(check.rhs_bonds)])
+        writer.writerow([])
+        writer.writerow([SELF_CHECK_NOTE])
+
+
 def _user_input_card(result: AnalysisResult) -> str:
     """HTML card quoting the user's overrides and species as they were typed."""
     lines = describe_user_input(
@@ -2196,6 +2275,142 @@ def _user_input_card(result: AnalysisResult) -> str:
     )
 
 
+def _report_head(title: str) -> str:
+    """The shared page shell: head, stylesheet, opening container.
+
+    Two reports now use it, and a second copy of a 100-line stylesheet
+    is a second copy to keep in step.
+    """
+    from . import PLUGIN_VERSION
+
+    return (
+        "<!doctype html>\n"
+        "<html>\n"
+        "<head>\n"
+        '    <meta charset="utf-8">\n'
+        f"    <title>{html.escape(title)} (v{PLUGIN_VERSION})</title>\n"
+        '    <link rel="preconnect" href="https://fonts.googleapis.com">\n'
+        '    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
+        '    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">\n'
+        "    <style>\n"
+        "        :root {\n"
+        "            --bg-color: #121214;\n"
+        "            --card-bg: #1e1e24;\n"
+        "            --text-main: #e8eaed;\n"
+        "            --text-muted: #9aa0a6;\n"
+        "            --border-color: #2f3037;\n"
+        "            --blue-color: #8ab4f8;\n"
+        "            --green-color: #81c995;\n"
+        "            --purple-color: #c58af9;\n"
+        "            --blue-bg: rgba(138, 180, 248, 0.12);\n"
+        "            --green-bg: rgba(129, 201, 149, 0.12);\n"
+        "            --purple-bg: rgba(197, 138, 249, 0.12);\n"
+        "        }\n"
+        "        body {\n"
+        "            background-color: var(--bg-color);\n"
+        "            color: var(--text-main);\n"
+        "            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;\n"
+        "            margin: 0;\n"
+        "            padding: 40px 24px;\n"
+        "            display: flex;\n"
+        "            justify-content: center;\n"
+        "        }\n"
+        "        .container {\n"
+        "            max-width: 960px;\n"
+        "            width: 100%;\n"
+        "        }\n"
+        "        .report-footer {\n"
+        "            margin-top: 24px;\n"
+        "            padding-top: 16px;\n"
+        "            border-top: 1px solid var(--border-color);\n"
+        "            font-size: 12px;\n"
+        "            color: var(--text-muted);\n"
+        "        }\n"
+        "        .report-header {\n"
+        "            margin-bottom: 24px;\n"
+        "            border-bottom: 1px solid var(--border-color);\n"
+        "            padding-bottom: 16px;\n"
+        "        }\n"
+        "        h1 {\n"
+        "            font-size: 24px;\n"
+        "            font-weight: 600;\n"
+        "            margin: 0 0 8px 0;\n"
+        "            color: var(--blue-color);\n"
+        "        }\n"
+        "        .meta-info {\n"
+        "            font-size: 13px;\n"
+        "            color: var(--text-muted);\n"
+        "            margin-bottom: 4px;\n"
+        "        }\n"
+        "        .card {\n"
+        "            background-color: var(--card-bg);\n"
+        "            border: 1px solid var(--border-color);\n"
+        "            border-radius: 8px;\n"
+        "            padding: 20px;\n"
+        "            margin-bottom: 20px;\n"
+        "        }\n"
+        "        table {\n"
+        "            width: 100%;\n"
+        "            border-collapse: separate;\n"
+        "            border-spacing: 0;\n"
+        "            margin-top: 16px;\n"
+        "            border: 1px solid var(--border-color);\n"
+        "            border-radius: 8px;\n"
+        "            overflow: hidden;\n"
+        "        }\n"
+        "        th, td {\n"
+        "            padding: 12px 16px;\n"
+        "            text-align: left;\n"
+        "            font-size: 14px;\n"
+        "        }\n"
+        "        th {\n"
+        "            background-color: #25262c;\n"
+        "            color: var(--text-main);\n"
+        "            font-weight: 600;\n"
+        "            border-bottom: 1px solid var(--border-color);\n"
+        "        }\n"
+        "        td {\n"
+        "            border-bottom: 1px solid rgba(47, 48, 55, 0.5);\n"
+        "        }\n"
+        "        tr:last-child td {\n"
+        "            border-bottom: none;\n"
+        "        }\n"
+        "        .row-ref {\n"
+        "            background-color: var(--blue-bg);\n"
+        "            color: var(--blue-color);\n"
+        "        }\n"
+        "        .row-left {\n"
+        "            background-color: var(--green-bg);\n"
+        "            color: var(--green-color);\n"
+        "        }\n"
+        "        .row-right {\n"
+        "            background-color: var(--purple-bg);\n"
+        "            color: var(--purple-color);\n"
+        "        }\n"
+        "        .smiles-mono {\n"
+        "            font-family: 'JetBrains Mono', monospace;\n"
+        "            font-size: 13px;\n"
+        "        }\n"
+        "    </style>\n"
+        "</head>\n"
+        "<body>\n"
+        '    <div class="container">\n'
+    )
+
+
+def _report_footer(generated_date: str) -> str:
+    """Who generated this and when, at the end where a reader looks."""
+    from . import PLUGIN_VERSION
+
+    return (
+        '        <div class="report-footer">\n'
+        f"            Strain Homodesmotic Reaction Generator "
+        f"v{PLUGIN_VERSION} - generated {generated_date}<br>\n"
+        f"            {html.escape(SELF_CHECK_NOTE)}\n"
+        "        </div>\n"
+    )
+
+
 def export_analysis(
     path: str | Path,
     result: AnalysisResult,
@@ -2210,111 +2425,8 @@ def export_analysis(
         from . import PLUGIN_VERSION
 
         output_path.write_text(
-            "<!doctype html>\n"
-            "<html>\n"
-            "<head>\n"
-            '    <meta charset="utf-8">\n'
-            f"    <title>Strain Homodesmotic Reaction Report (v{PLUGIN_VERSION})</title>\n"
-            '    <link rel="preconnect" href="https://fonts.googleapis.com">\n'
-            '    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
-            '    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">\n'
-            "    <style>\n"
-            "        :root {\n"
-            "            --bg-color: #121214;\n"
-            "            --card-bg: #1e1e24;\n"
-            "            --text-main: #e8eaed;\n"
-            "            --text-muted: #9aa0a6;\n"
-            "            --border-color: #2f3037;\n"
-            "            --blue-color: #8ab4f8;\n"
-            "            --green-color: #81c995;\n"
-            "            --purple-color: #c58af9;\n"
-            "            --blue-bg: rgba(138, 180, 248, 0.12);\n"
-            "            --green-bg: rgba(129, 201, 149, 0.12);\n"
-            "            --purple-bg: rgba(197, 138, 249, 0.12);\n"
-            "        }\n"
-            "        body {\n"
-            "            background-color: var(--bg-color);\n"
-            "            color: var(--text-main);\n"
-            "            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;\n"
-            "            margin: 0;\n"
-            "            padding: 40px 24px;\n"
-            "            display: flex;\n"
-            "            justify-content: center;\n"
-            "        }\n"
-            "        .container {\n"
-            "            max-width: 960px;\n"
-            "            width: 100%;\n"
-            "        }\n"
-            "        .report-header {\n"
-            "            margin-bottom: 24px;\n"
-            "            border-bottom: 1px solid var(--border-color);\n"
-            "            padding-bottom: 16px;\n"
-            "        }\n"
-            "        h1 {\n"
-            "            font-size: 24px;\n"
-            "            font-weight: 600;\n"
-            "            margin: 0 0 8px 0;\n"
-            "            color: var(--blue-color);\n"
-            "        }\n"
-            "        .meta-info {\n"
-            "            font-size: 13px;\n"
-            "            color: var(--text-muted);\n"
-            "            margin-bottom: 4px;\n"
-            "        }\n"
-            "        .card {\n"
-            "            background-color: var(--card-bg);\n"
-            "            border: 1px solid var(--border-color);\n"
-            "            border-radius: 8px;\n"
-            "            padding: 20px;\n"
-            "            margin-bottom: 20px;\n"
-            "        }\n"
-            "        table {\n"
-            "            width: 100%;\n"
-            "            border-collapse: separate;\n"
-            "            border-spacing: 0;\n"
-            "            margin-top: 16px;\n"
-            "            border: 1px solid var(--border-color);\n"
-            "            border-radius: 8px;\n"
-            "            overflow: hidden;\n"
-            "        }\n"
-            "        th, td {\n"
-            "            padding: 12px 16px;\n"
-            "            text-align: left;\n"
-            "            font-size: 14px;\n"
-            "        }\n"
-            "        th {\n"
-            "            background-color: #25262c;\n"
-            "            color: var(--text-main);\n"
-            "            font-weight: 600;\n"
-            "            border-bottom: 1px solid var(--border-color);\n"
-            "        }\n"
-            "        td {\n"
-            "            border-bottom: 1px solid rgba(47, 48, 55, 0.5);\n"
-            "        }\n"
-            "        tr:last-child td {\n"
-            "            border-bottom: none;\n"
-            "        }\n"
-            "        .row-ref {\n"
-            "            background-color: var(--blue-bg);\n"
-            "            color: var(--blue-color);\n"
-            "        }\n"
-            "        .row-left {\n"
-            "            background-color: var(--green-bg);\n"
-            "            color: var(--green-color);\n"
-            "        }\n"
-            "        .row-right {\n"
-            "            background-color: var(--purple-bg);\n"
-            "            color: var(--purple-color);\n"
-            "        }\n"
-            "        .smiles-mono {\n"
-            "            font-family: 'JetBrains Mono', monospace;\n"
-            "            font-size: 13px;\n"
-            "        }\n"
-            "    </style>\n"
-            "</head>\n"
-            "<body>\n"
-            '    <div class="container">\n'
-            '        <div class="report-header">\n'
+            _report_head("Strain Homodesmotic Reaction Report")
+            + '        <div class="report-header">\n'
             "            <h1>Homodesmotic Reaction Report</h1>\n"
             f'            <div class="meta-info">File: {html.escape(filename)}</div>\n'
             f'            <div class="meta-info">Generated on: {generated_date}</div>\n'
@@ -2374,7 +2486,10 @@ def export_analysis(
             )
             + "\n                </tbody>\n"
             "            </table>\n"
-            "        </div>\n" + _user_input_card(result) + "    </div>\n"
+            "        </div>\n"
+            + _user_input_card(result)
+            + _report_footer(generated_date)
+            + "    </div>\n"
             "</body>\n"
             "</html>\n",
             encoding="utf-8",
@@ -2382,20 +2497,29 @@ def export_analysis(
         return
 
     if output_path.suffix.lower() == ".txt":
+        from . import PLUGIN_VERSION
+
         header = (
             f"Homodesmotic Reaction Report\n"
             f"============================\n"
             f"File: {filename}\n"
             f"Generated on: {generated_date}\n\n"
         )
-        output_path.write_text(header + result.equation_text + "\n", encoding="utf-8")
+        footer = (
+            f"\n\nStrain Homodesmotic Reaction Generator v{PLUGIN_VERSION} "
+            f"- generated {generated_date}\n"
+        )
+        output_path.write_text(header + result.equation_text + footer, encoding="utf-8")
         return
 
     with output_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
+        from . import PLUGIN_VERSION
+
         writer.writerow(["Homodesmotic Reaction Report"])
         writer.writerow(["File", filename])
         writer.writerow(["Generated on", generated_date])
+        writer.writerow(["Plugin version", PLUGIN_VERSION])
         writer.writerow([])
         writer.writerow(["Environment", "Count", "Reference SMILES", "Description"])
         for match in result.matches:
