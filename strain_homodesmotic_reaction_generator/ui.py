@@ -382,7 +382,7 @@ if QDialog is not None:
             self.setWindowTitle(
                 f"Strain Homodesmotic Reaction Generator (v{PLUGIN_VERSION})"
             )
-            self.resize(960, 760)
+            self.resize(960, 900)
 
             layout = QVBoxLayout(self)
 
@@ -426,8 +426,10 @@ if QDialog is not None:
             )
             self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
             self.table.itemDoubleClicked.connect(self._on_row_double_clicked)
-            # The draft is the point of the window; the table is how you steer
-            # it, so the report gets the room when the dialog is resized.
+            # A table sized by its stretch share alone collapses to a few rows,
+            # so the floor is what actually sets its height; the cap only stops
+            # it eating the report on a tall screen.
+            self.table.setMinimumHeight(340)
             self.table.setMaximumHeight(520)
             layout.addWidget(self.table, 1)
 
