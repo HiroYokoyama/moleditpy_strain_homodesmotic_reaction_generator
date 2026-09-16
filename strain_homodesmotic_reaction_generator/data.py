@@ -160,27 +160,126 @@ ENVIRONMENTS: tuple[EnvironmentRule, ...] = (
     # Carbonyls
     EnvironmentRule(
         "Primary-Carbonyl",
-        "[CX4H3]-[CX3](=[OX1])",
+        "[CX4H3]-[CX3;!$([CX3][OX2]);!$([CX3][NX3]);!$([CX3][SX2])](=[OX1])",
         "CC(=O)C",
         "Carbonyl carbon bonded to primary carbons.",
     ),
     EnvironmentRule(
         "Secondary-Carbonyl",
-        "[CX4H2]-[CX3](=[OX1])",
+        "[CX4H2]-[CX3;!$([CX3][OX2]);!$([CX3][NX3]);!$([CX3][SX2])](=[OX1])",
         "CCC(=O)C",
         "Carbonyl carbon bonded to a secondary carbon.",
     ),
     EnvironmentRule(
         "Tertiary-Carbonyl",
-        "[CX4H1]-[CX3](=[OX1])",
+        "[CX4H1]-[CX3;!$([CX3][OX2]);!$([CX3][NX3]);!$([CX3][SX2])](=[OX1])",
         "CC(C)C(=O)C",
         "Carbonyl carbon bonded to a tertiary carbon.",
     ),
     EnvironmentRule(
         "Quaternary-Carbonyl",
-        "[CX4H0]-[CX3](=[OX1])",
+        "[CX4H0]-[CX3;!$([CX3][OX2]);!$([CX3][NX3]);!$([CX3][SX2])](=[OX1])",
         "CC(C)(C)C(=O)C",
         "Carbonyl carbon bonded to a quaternary carbon.",
+    ),
+    # Carboxylic acids
+    EnvironmentRule(
+        "Primary-Carboxylic-Acid",
+        "[CX4H3]-[CX3](=[OX1])-[OX2H1]",
+        "CC(=O)O",
+        "Carboxylic acid on a primary carbon.",
+    ),
+    EnvironmentRule(
+        "Secondary-Carboxylic-Acid",
+        "[CX4H2]-[CX3](=[OX1])-[OX2H1]",
+        "CCC(=O)O",
+        "Carboxylic acid on a secondary carbon.",
+    ),
+    EnvironmentRule(
+        "Tertiary-Carboxylic-Acid",
+        "[CX4H1]-[CX3](=[OX1])-[OX2H1]",
+        "CC(C)C(=O)O",
+        "Carboxylic acid on a tertiary carbon.",
+    ),
+    EnvironmentRule(
+        "Quaternary-Carboxylic-Acid",
+        "[CX4H0]-[CX3](=[OX1])-[OX2H1]",
+        "CC(C)(C)C(=O)O",
+        "Carboxylic acid on a quaternary carbon.",
+    ),
+    EnvironmentRule(
+        "Formyl-Carboxylic-Acid",
+        "[CX3H1](=[OX1])-[OX2H1]",
+        "OC=O",
+        "Carboxylic acid with no carbon substituent, as in formic acid.",
+    ),
+    # Esters
+    EnvironmentRule(
+        "Primary-Ester",
+        "[CX4H3]-[CX3](=[OX1])-[OX2H0]",
+        "COC(C)=O",
+        "Ester acyl group on a primary carbon.",
+    ),
+    EnvironmentRule(
+        "Secondary-Ester",
+        "[CX4H2]-[CX3](=[OX1])-[OX2H0]",
+        "CCC(=O)OC",
+        "Ester acyl group on a secondary carbon.",
+    ),
+    EnvironmentRule(
+        "Tertiary-Ester",
+        "[CX4H1]-[CX3](=[OX1])-[OX2H0]",
+        "COC(=O)C(C)C",
+        "Ester acyl group on a tertiary carbon.",
+    ),
+    EnvironmentRule(
+        "Quaternary-Ester",
+        "[CX4H0]-[CX3](=[OX1])-[OX2H0]",
+        "COC(=O)C(C)(C)C",
+        "Ester acyl group on a quaternary carbon.",
+    ),
+    EnvironmentRule(
+        "Formate-Ester",
+        "[CX3H1](=[OX1])-[OX2H0]",
+        "COC=O",
+        "Ester with no carbon on the acyl side, as in a formate.",
+    ),
+    # Amides
+    EnvironmentRule(
+        "Primary-Amide",
+        "[CX4H3]-[CX3](=[OX1])-[NX3]",
+        "CC(N)=O",
+        "Amide acyl group on a primary carbon.",
+    ),
+    EnvironmentRule(
+        "Secondary-Amide",
+        "[CX4H2]-[CX3](=[OX1])-[NX3]",
+        "CCC(N)=O",
+        "Amide acyl group on a secondary carbon.",
+    ),
+    EnvironmentRule(
+        "Tertiary-Amide",
+        "[CX4H1]-[CX3](=[OX1])-[NX3]",
+        "CC(C)C(N)=O",
+        "Amide acyl group on a tertiary carbon.",
+    ),
+    EnvironmentRule(
+        "Quaternary-Amide",
+        "[CX4H0]-[CX3](=[OX1])-[NX3]",
+        "CC(C)(C)C(N)=O",
+        "Amide acyl group on a quaternary carbon.",
+    ),
+    EnvironmentRule(
+        "Formamide",
+        "[CX3H1](=[OX1])-[NX3]",
+        "NC=O",
+        "Amide with no carbon on the acyl side, as in formamide.",
+    ),
+    EnvironmentRule(
+        "Urea-Carbonyl",
+        "[NX3]-[CX3](=[OX1])-[NX3]",
+        "NC(N)=O",
+        "Carbonyl flanked by two nitrogens, as in a urea.",
     ),
     # Amines
     EnvironmentRule(
@@ -799,6 +898,23 @@ BALANCE_SPECIES: tuple[BalanceSpecies, ...] = (
     BalanceSpecies(
         "tert-Butyl methyl silane", "C[SiH2]C(C)(C)C", "Highly branched dialkylsilane"
     ),
+    # --- Acyl groups: acids, esters and amides ------------------------
+    BalanceSpecies("Formic acid", "OC=O", "Simplest carboxylic acid"),
+    BalanceSpecies("Acetic acid", "CC(=O)O", "Two-carbon carboxylic acid"),
+    BalanceSpecies("Propanoic acid", "CCC(=O)O", "Three-carbon carboxylic acid"),
+    BalanceSpecies("Isobutyric acid", "CC(C)C(=O)O", "Branched carboxylic acid"),
+    BalanceSpecies("Pivalic acid", "CC(C)(C)C(=O)O", "Highly branched carboxylic acid"),
+    BalanceSpecies("Methyl formate", "COC=O", "Simplest ester"),
+    BalanceSpecies("Methyl acetate", "COC(C)=O", "Two-carbon acyl ester"),
+    BalanceSpecies("Ethyl acetate", "CCOC(C)=O", "Ester with an ethyl alkoxy group"),
+    BalanceSpecies("Methyl propanoate", "CCC(=O)OC", "Three-carbon acyl ester"),
+    BalanceSpecies("Formamide", "NC=O", "Simplest amide"),
+    BalanceSpecies("Acetamide", "CC(N)=O", "Two-carbon primary amide"),
+    BalanceSpecies("Propanamide", "CCC(N)=O", "Three-carbon primary amide"),
+    BalanceSpecies("N-Methylacetamide", "CNC(C)=O", "Secondary amide"),
+    BalanceSpecies("N,N-Dimethylacetamide", "CN(C)C(C)=O", "Tertiary amide"),
+    BalanceSpecies("Urea", "NC(N)=O", "Carbonyl flanked by two nitrogens"),
+    BalanceSpecies("Dimethyl carbonate", "COC(=O)OC", "Carbonyl flanked by two ethers"),
 )
 
 

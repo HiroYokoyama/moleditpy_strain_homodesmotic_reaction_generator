@@ -64,14 +64,25 @@ def _groups(smiles: str) -> Counter:
     )
 
 
+def _state(atom) -> str:
+    """Element, hybridisation and hydrogen count.
+
+    The same distinction the plugin draws. Hydrogen count alone cannot tell a
+    carbonyl carbon from a quaternary one, which made this check weaker than
+    the claim it is here to police.
+    """
+    hydrogens = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 1)
+    return f"{atom.GetSymbol()}({str(atom.GetHybridization()).lower()},H{hydrogens})"
+
+
 def _heavy_bonds(smiles: str) -> Counter:
-    """Heavy-atom bonds labelled by the two groups they join."""
+    """Heavy-atom bonds labelled by the two atom states they join."""
     counts: Counter = Counter()
     for bond in _explicit(smiles).GetBonds():
         begin, end = bond.GetBeginAtom(), bond.GetEndAtom()
         if begin.GetAtomicNum() == 1 or end.GetAtomicNum() == 1:
             continue
-        pair = "-".join(sorted((_carbon_label(begin), _carbon_label(end))))
+        pair = "-".join(sorted((_state(begin), _state(end))))
         counts[f"{pair} {bond.GetBondType()}"] += 1
     return counts
 
@@ -240,12 +251,12 @@ def test_forcing_a_species_you_have_energies_for_puts_it_in_the_equation():
 
 @pytest.mark.skipif(core.milp is None, reason="SciPy is required for the MILP path")
 def test_a_species_that_cannot_help_is_named_and_the_draft_survives():
-    """Isobutane brings a methine carbon nothing on the other side has."""
+    """Silane brings a silicon nothing on the other side can absorb."""
     result = analyze_molecule(
         Chem.MolFromSmiles(CYCLOBUTANE),
-        user_species=[UserSpecies("CC(C)C", "isobutane", required=True)],
+        user_species=[UserSpecies("[SiH4]", "silane", required=True)],
     )
-    assert result.unmet_required == ("CC(C)C",)
+    assert result.unmet_required == ("[SiH4]",)
     assert result.reaction_type == "Hyperhomodesmotic"
     assert _check(result)["bonds"]
 

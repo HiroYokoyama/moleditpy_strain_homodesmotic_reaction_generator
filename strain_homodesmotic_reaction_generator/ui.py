@@ -925,6 +925,12 @@ if QDialog is not None:
 
         def _update_warning(self, result: AnalysisResult) -> None:
             messages = []
+            if result.is_identity:
+                messages.append(
+                    "The target is already its own reference molecule, so this "
+                    "reaction is an identity and measures a strain energy of "
+                    "zero by construction."
+                )
             if result.cancelled_references:
                 messages.append(
                     "The reference for "

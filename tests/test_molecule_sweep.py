@@ -10,6 +10,7 @@ test that reads that verdict back would agree however wrong both were.
 
 from collections import Counter
 from pathlib import Path
+import re
 import sys
 
 import pytest
@@ -41,65 +42,164 @@ STRAINED_RINGS = {
     "cyclopentane": "C1CCCC1",
     "cyclohexane": "C1CCCCC1",
     "cycloheptane": "C1CCCCCC1",
+    "cyclooctane": "C1CCCCCCC1",
+    "cyclodecane": "C1CCCCCCCCC1",
     "bicyclobutane": "C1C2CC12",
     "spiropentane": "C1CC12CC2",
     "cubane": "C1(C2C3C4C1C5C4C3C25)",
+    "prismane": "C12C3C1C1C2C31",
     "bicyclo[1.1.0]pentane": "C1C2CC2C1",
+    "bicyclo[2.2.0]hexane": "C1CC2CCC12",
     "norbornane": "C1CC2CCC1C2",
+    "bicyclo[2.2.2]octane": "C1CC2CCC1CC2",
     "adamantane": "C1C2CC3CC1CC(C2)C3",
+    "spiro[3.3]heptane": "C1CC2(C1)CCC2",
+    "spiro[2.5]octane": "C1CC12CCCCC2",
+    "housane": "C1C2CC2C1",
+    "methylcyclopropane": "CC1CC1",
+    "ethylcyclopropane": "CCC1CC1",
+    "cyclopropylcyclopropane": "C1CC1C1CC1",
+    "trans-decalin": "C1CCC2CCCCC2C1",
 }
 
 HETEROCYCLES = {
-    "oxetane": "C1COC1",
     "oxirane": "C1CO1",
+    "oxetane": "C1COC1",
     "tetrahydrofuran": "C1CCOC1",
-    "azetidine": "C1CNC1",
+    "tetrahydropyran": "C1CCOCC1",
+    "oxepane": "C1CCCOCC1",
     "aziridine": "C1CN1",
+    "azetidine": "C1CNC1",
     "pyrrolidine": "C1CCNC1",
+    "piperidine": "C1CCNCC1",
+    "thiirane": "C1CS1",
     "thietane": "C1CSC1",
+    "tetrahydrothiophene": "C1CCSC1",
     "dioxolane": "C1COCO1",
+    "dioxane": "C1COCCO1",
+    "morpholine": "C1COCCN1",
+    "piperazine": "C1CNCCN1",
+    "oxaspiropentane": "C1CC12CO2",
+    "2-methyloxirane": "CC1CO1",
+    "N-methylaziridine": "CN1CC1",
 }
 
 UNSATURATED = {
     "cyclopropene": "C1=CC1",
     "cyclobutene": "C1=CCC1",
     "cyclopentene": "C1=CCCC1",
+    "cyclohexene": "C1=CCCCC1",
+    "cycloheptene": "C1=CCCCCC1",
+    "1,3-cyclohexadiene": "C1=CC=CCC1",
+    "1,4-cyclohexadiene": "C1=CCC=CC1",
+    "cyclooctatetraene": "C1=CC=CC=CC=C1",
     "benzene": "c1ccccc1",
     "toluene": "Cc1ccccc1",
-    "naphthalene": "c1ccc2ccccc2c1",
+    "o-xylene": "Cc1ccccc1C",
     "styrene": "C=Cc1ccccc1",
+    "biphenyl": "c1ccc(-c2ccccc2)cc1",
+    "naphthalene": "c1ccc2ccccc2c1",
+    "anthracene": "c1ccc2cc3ccccc3cc2c1",
+    "indane": "C1Cc2ccccc2C1",
     "1,3-butadiene": "C=CC=C",
-    "cyclooctatetraene": "C1=CC=CC=CC=C1",
+    "1,3-pentadiene": "C=CC=CC",
+    "allene": "C=C=C",
+    "propyne": "CC#C",
+    "2-butyne": "CC#CC",
+    "phenylacetylene": "C#Cc1ccccc1",
+    "methylenecyclopropane": "C=C1CC1",
+    "furan": "c1ccoc1",
+    "thiophene": "c1ccsc1",
+    "pyrrole": "c1cc[nH]c1",
+    "pyridine": "c1ccncc1",
+    "pyrimidine": "c1cncnc1",
+    "imidazole": "c1c[nH]cn1",
+}
+
+ACYL = {
+    "formic acid": "OC=O",
+    "acetic acid": "CC(=O)O",
+    "propanoic acid": "CCC(=O)O",
+    "isobutyric acid": "CC(C)C(=O)O",
+    "pivalic acid": "CC(C)(C)C(=O)O",
+    "cyclopropanecarboxylic acid": "OC(=O)C1CC1",
+    "methyl formate": "COC=O",
+    "methyl acetate": "COC(C)=O",
+    "ethyl acetate": "CCOC(C)=O",
+    "methyl propanoate": "CCC(=O)OC",
+    "beta-propiolactone": "O=C1CCO1",
+    "gamma-butyrolactone": "O=C1CCCO1",
+    "delta-valerolactone": "O=C1CCCCO1",
+    "formamide": "NC=O",
+    "acetamide": "CC(N)=O",
+    "propanamide": "CCC(N)=O",
+    "N-methylacetamide": "CNC(C)=O",
+    "N,N-dimethylacetamide": "CN(C)C(C)=O",
+    "beta-lactam": "O=C1CCN1",
+    "gamma-lactam": "O=C1CCCN1",
+    "succinimide": "O=C1CCC(=O)N1",
+    "urea": "NC(N)=O",
+    "dimethyl carbonate": "COC(=O)OC",
+    "oxalic acid dimethyl ester": "COC(=O)C(=O)OC",
 }
 
 FUNCTIONALISED = {
     "acetone": "CC(=O)C",
-    "acetic acid": "CC(=O)O",
-    "ethyl acetate": "CCOC(C)=O",
-    "acetamide": "CC(N)=O",
+    "acetaldehyde": "CC=O",
+    "butanone": "CCC(C)=O",
+    "cyclohexanone": "O=C1CCCCC1",
+    "cyclobutanone": "O=C1CCC1",
+    "cyclopropanone": "O=C1CC1",
     "acetonitrile": "CC#N",
+    "propanenitrile": "CCC#N",
+    "cyclopropanecarbonitrile": "N#CC1CC1",
+    "methanol": "CO",
     "ethanol": "CCO",
+    "isopropanol": "CC(C)O",
+    "cyclopropanol": "OC1CC1",
+    "ethylene glycol": "OCCO",
+    "dimethyl ether": "COC",
     "diethyl ether": "CCOCC",
+    "methylamine": "CN",
+    "dimethylamine": "CNC",
     "trimethylamine": "CN(C)C",
+    "cyclopropylamine": "NC1CC1",
     "dimethyl sulfide": "CSC",
+    "methanethiol": "CS",
+    "dimethyl sulfoxide": "CS(=O)C",
+    "dimethyl sulfone": "CS(=O)(=O)C",
+    "trimethylphosphine": "CP(C)C",
+    "tetramethylsilane": "C[Si](C)(C)C",
     "chlorocyclopropane": "ClC1CC1",
     "fluorocyclobutane": "FC1CCC1",
-    "cyclopropanol": "OC1CC1",
-    "cyclopropanecarbonitrile": "N#CC1CC1",
-    "beta-lactam": "O=C1CCN1",
-    "beta-propiolactone": "O=C1CCO1",
+    "bromoethane": "CCBr",
+    "iodomethane": "CI",
+    "1,2-dichloroethane": "ClCCCl",
+    "trimethylborane": "CB(C)C",
+    "dimethyl selenide": "C[Se]C",
 }
 
 BRANCHED = {
     "isobutane": "CC(C)C",
     "neopentane": "CC(C)(C)C",
+    "2,3-dimethylbutane": "CC(C)C(C)C",
     "2,2,3,3-tetramethylbutane": "CC(C)(C)C(C)(C)C",
     "tert-butylcyclopropane": "CC(C)(C)C1CC1",
     "1,1-dimethylcyclopropane": "CC1(C)CC1",
+    "isooctane": "CC(C)CC(C)(C)C",
+    "octane": "CCCCCCCC",
+    "hexadecane": "CCCCCCCCCCCCCCCC",
 }
 
 ALL_MOLECULES = {}
-for group in (STRAINED_RINGS, HETEROCYCLES, UNSATURATED, FUNCTIONALISED, BRANCHED):
+for group in (
+    STRAINED_RINGS,
+    HETEROCYCLES,
+    UNSATURATED,
+    ACYL,
+    FUNCTIONALISED,
+    BRANCHED,
+):
     ALL_MOLECULES.update(group)
 
 NAMES = sorted(ALL_MOLECULES)
@@ -132,13 +232,27 @@ def _groups(smiles: str) -> Counter:
     )
 
 
+def _state(atom) -> str:
+    """Element, hybridisation and hydrogen count.
+
+    Deliberately the same distinction the plugin makes. Labelling by hydrogen
+    count alone was coarser: it could not tell a carbonyl carbon from a
+    quaternary one, and passed three lactones whose bond types the plugin had
+    correctly found not conserved.
+    """
+    if atom.GetAtomicNum() == 1:
+        return "H"
+    hydrogens = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 1)
+    return f"{atom.GetSymbol()}({str(atom.GetHybridization()).lower()},H{hydrogens})"
+
+
 def _bonds(smiles: str) -> Counter:
     counts: Counter = Counter()
     for bond in _explicit(smiles).GetBonds():
         begin, end = bond.GetBeginAtom(), bond.GetEndAtom()
         if begin.GetAtomicNum() == 1 or end.GetAtomicNum() == 1:
             continue
-        pair = "-".join(sorted((_label(begin), _label(end))))
+        pair = "-".join(sorted((_state(begin), _state(end))))
         counts[f"{pair} {bond.GetBondType()}"] += 1
     return counts
 
@@ -236,10 +350,19 @@ def test_a_homodesmotic_verdict_conserves_the_groups(name):
 
 @pytest.mark.parametrize("name", NAMES)
 def test_nothing_is_left_unresolved_without_being_called_unbalanced(name):
+    """A guard, not a measurement: no molecule here currently leaves atoms over."""
     result = _analyse(name)
     leftover = result.unresolved_left_atoms or result.unresolved_right_atoms
     if leftover:
         assert result.reaction_type == "Unbalanced"
+
+
+def test_the_conservation_checks_are_not_all_skipping():
+    """Those tests skip on the verdict, so a bad change could empty them out."""
+    verdicts = Counter(_analyse(name).reaction_type for name in NAMES)
+    assert verdicts["Hyperhomodesmotic"] >= 50
+    assert verdicts["Homodesmotic"] >= 10
+    assert sum(verdicts.values()) == len(NAMES)
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -252,14 +375,22 @@ def test_no_species_appears_on_both_sides(name):
 
 
 @pytest.mark.parametrize("name", NAMES)
-def test_no_term_carries_a_zero_or_negative_count(name):
+def test_a_cancelled_term_never_reaches_the_equation(name):
+    """Terms drop to zero during cancellation and must then disappear."""
     result = _analyse(name)
-    counts = (
-        [term.count for term in result.left_balance_terms]
-        + [term.count for term in result.right_balance_terms]
-        + [match.count for match in result.matches]
-    )
-    assert all(count >= 0 for count in counts)
+    cancelled = [
+        term.smiles
+        for term in result.left_balance_terms + result.right_balance_terms
+        if term.count == 0
+    ] + [match.reference_smiles for match in result.matches if match.count == 0]
+    line = result.equation_text.splitlines()[3]
+    surviving = {smiles for _count, smiles in _sides(result)[0]}
+    surviving |= {smiles for _count, smiles in _sides(result)[1]}
+    for smiles in cancelled:
+        if smiles not in surviving:
+            assert f" {smiles} " not in f" {line} ", smiles
+    # A standalone zero coefficient, not the 0 inside "10 CC".
+    assert not re.search(r"(^|\+ )0 ", line)
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -397,13 +528,11 @@ def test_a_none_molecule_reports_rather_than_crashing():
 # A known gap, pinned so it cannot become a silent wrong answer
 # ---------------------------------------------------------------------------
 
-#: ENVIRONMENTS has no rule for an ester, amide or carboxylic acid, so the
-#: carbonyl rule matches and proposes a ketone reference that carries neither
-#: the second oxygen nor the nitrogen. Nothing in the balance library can add a
-#: bare O or N either, so these cannot be balanced at all. Reporting that is
-#: the correct behaviour; quietly returning a clean-looking equation would not
-#: be. If a rule is ever added for them, this test should start failing.
-UNSUPPORTED_CARBONYLS = {
+#: These were unbalanceable until acid, ester and amide rules were added: the
+#: plain carbonyl rule claimed them and proposed a ketone reference carrying
+#: neither the second oxygen nor the nitrogen. They are pinned here because
+#: they are the cases that regress first if those rules are ever loosened.
+ACYL_TARGETS = {
     "acetic acid": "CC(=O)O",
     "ethyl acetate": "CCOC(C)=O",
     "acetamide": "CC(N)=O",
@@ -414,20 +543,63 @@ UNSUPPORTED_CARBONYLS = {
 }
 
 
-@pytest.mark.parametrize("name", sorted(UNSUPPORTED_CARBONYLS))
-def test_an_unsupported_carbonyl_never_claims_to_be_homodesmotic(name):
-    """The gap must show as a weak verdict, never as a clean-looking answer."""
-    result = analyze_molecule(Chem.MolFromSmiles(UNSUPPORTED_CARBONYLS[name]))
-    assert result.reaction_type in {"Unbalanced", "Elemental Balance", "Isodesmic"}
+@pytest.mark.parametrize("name", sorted(ACYL_TARGETS))
+def test_an_acyl_target_balances(name):
+    result = analyze_molecule(Chem.MolFromSmiles(ACYL_TARGETS[name]))
+    assert result.reaction_type in {"Hyperhomodesmotic", "Homodesmotic"}
+    assert _conserved(result)["atoms"], result.equation_text.splitlines()[3]
+    assert not result.unresolved_left_atoms
+    assert not result.unresolved_right_atoms
 
 
-@pytest.mark.parametrize("name", sorted(UNSUPPORTED_CARBONYLS))
-def test_an_unsupported_carbonyl_says_why_it_is_weak(name):
-    """Either atoms are left over, or the references cancelled to nothing."""
-    result = analyze_molecule(Chem.MolFromSmiles(UNSUPPORTED_CARBONYLS[name]))
-    leftover = result.unresolved_left_atoms or result.unresolved_right_atoms
-    no_references = not [match for match in result.matches if match.count > 0]
-    assert leftover or no_references or result.is_elemental_balance
+@pytest.mark.parametrize("name", sorted(ACYL_TARGETS))
+def test_an_acyl_target_gets_a_reference_of_its_own_kind(name):
+    """A ketone reference for an ester is the bug these rules were added for."""
+    result = analyze_molecule(Chem.MolFromSmiles(ACYL_TARGETS[name]))
+    assert [match for match in result.matches if match.count > 0]
+
+
+#: The ketone and aldehyde rules, which an acid, ester or amide must not match.
+#: Listed explicitly rather than matched by suffix, because Urea-Carbonyl is a
+#: carbonyl rule too and it is supposed to claim a urea.
+PLAIN_CARBONYL_RULES = {
+    "Primary-Carbonyl",
+    "Secondary-Carbonyl",
+    "Tertiary-Carbonyl",
+    "Quaternary-Carbonyl",
+}
+
+
+def test_the_plain_carbonyl_rules_no_longer_claim_an_acyl_carbon():
+    from strain_homodesmotic_reaction_generator.core import (
+        unique_substructure_matches,
+    )
+    from strain_homodesmotic_reaction_generator.data import ENVIRONMENTS
+
+    plain = [rule for rule in ENVIRONMENTS if rule.name in PLAIN_CARBONYL_RULES]
+    assert len(plain) == len(PLAIN_CARBONYL_RULES)
+    for name, smiles in sorted(ACYL_TARGETS.items()):
+        mol = Chem.MolFromSmiles(smiles)
+        for rule in plain:
+            assert not unique_substructure_matches(
+                mol, rule.smarts, rule.atom_centric
+            ), f"{rule.name} still claims {name}"
+
+
+@pytest.mark.parametrize("name", ["acetone", "acetaldehyde", "cyclohexanone"])
+def test_a_real_ketone_or_aldehyde_is_still_claimed(name):
+    """Tightening the rule must not throw the ketones out with the esters."""
+    from strain_homodesmotic_reaction_generator.core import (
+        unique_substructure_matches,
+    )
+    from strain_homodesmotic_reaction_generator.data import ENVIRONMENTS
+
+    mol = Chem.MolFromSmiles(ALL_MOLECULES[name])
+    plain = [rule for rule in ENVIRONMENTS if rule.name in PLAIN_CARBONYL_RULES]
+    assert any(
+        unique_substructure_matches(mol, rule.smarts, rule.atom_centric)
+        for rule in plain
+    )
 
 
 def test_no_two_environment_rules_claim_the_same_atoms():
@@ -440,7 +612,7 @@ def test_no_two_environment_rules_claim_the_same_atoms():
     from strain_homodesmotic_reaction_generator.data import ENVIRONMENTS
 
     targets = dict(ALL_MOLECULES)
-    targets.update(UNSUPPORTED_CARBONYLS)
+    targets.update(ACYL_TARGETS)
     for name, smiles in sorted(targets.items()):
         mol = Chem.MolFromSmiles(smiles)
         owners = defaultdict(list)

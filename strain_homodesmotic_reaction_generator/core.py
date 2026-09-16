@@ -96,6 +96,7 @@ class AnalysisResult:
     cancelled_references: tuple[str, ...] = ()
     excluded_species: tuple[str, ...] = ()
     ignored_exclusions: tuple[str, ...] = ()
+    is_identity: bool = False
 
 
 #: Shown wherever the tool states a verdict. It conserves what it counts, and
@@ -569,7 +570,17 @@ def analyze_molecule(
     ignored_exclusions: tuple[str, ...] = ()
 
     if milp is not None and np is not None:
+        # Keeping a reference off the left stops the solver cancelling the
+        # equation down to something that no longer measures the target. It is
+        # pointless when the target IS one of its own references, though: that
+        # equation is an identity whatever the solver does, and insisting
+        # otherwise drags in unrelated species to avoid an honest answer.
         reference_side = tuple(term.smiles for term in rhs_terms)
+        target_canonical = canonical_smiles(target_smiles)
+        if any(
+            canonical_smiles(smiles) == target_canonical for smiles in reference_side
+        ):
+            reference_side = ()
         # An exclusion that leaves nothing balanceable is dropped rather than
         # failing the run, the same way an impossible requirement is.
         for banned in (excluded, ()) if excluded else ((),):
@@ -582,6 +593,8 @@ def analyze_molecule(
                     reference_side,
                     banned,
                     required_sides,
+                    target_smiles,
+                    tuple(target_atoms),
                 )
             )
             if milp_success:
@@ -761,6 +774,22 @@ def analyze_molecule(
         unresolved_right_atoms,
     )
 
+    # A target that is already its own reference gives A -> A. That is the
+    # right answer, the strain energy being zero by construction, but it is
+    # worth saying out loud rather than presenting as a successful balance.
+    identity_left = Counter({canonical_smiles(target_smiles): 1})
+    for term in left_balance_terms:
+        if term.count > 0:
+            identity_left[canonical_smiles(term.smiles)] += term.count
+    identity_right: Counter[str] = Counter()
+    for term in rhs_terms:
+        if term.count > 0:
+            identity_right[canonical_smiles(term.smiles)] += term.count
+    for term in right_balance_terms:
+        if term.count > 0:
+            identity_right[canonical_smiles(term.smiles)] += term.count
+    is_identity = bool(identity_left) and identity_left == identity_right
+
     user_input_lines = describe_user_input(
         tuple(sorted(overrides.items())),
         kept_species,
@@ -786,6 +815,7 @@ def analyze_molecule(
         lhs_bonds,
         rhs_bonds,
         user_input_lines,
+        is_identity,
     )
     equation_html = build_equation_html(
         target_smiles,
@@ -804,6 +834,7 @@ def analyze_molecule(
         lhs_bonds,
         rhs_bonds,
         user_input_lines,
+        is_identity,
     )
     return AnalysisResult(
         target_smiles,
@@ -829,6 +860,7 @@ def analyze_molecule(
         cancelled_references,
         excluded,
         ignored_exclusions,
+        is_identity,
     )
 
 
@@ -838,6 +870,14 @@ def species_atom_counts(smiles: str) -> Counter[str]:
     if mol is None:
         return Counter()
     return atom_counts(explicit_hydrogen_copy(mol))
+
+
+def canonical_smiles(smiles: str) -> str:
+    """RDKit's canonical form, or the input unchanged if it will not parse."""
+    if Chem is None or not smiles:
+        return smiles
+    mol = Chem.MolFromSmiles(smiles)
+    return Chem.MolToSmiles(mol) if mol is not None else smiles
 
 
 def is_valid_smiles(smiles: str) -> bool:
@@ -1013,6 +1053,8 @@ def build_hyperhomodesmotic_balance_terms(
     reference_smiles: Sequence[str] = (),
     excluded_smiles: Sequence[str] = (),
     required_sides: Mapping[str, str] | None = None,
+    target_smiles: str = "",
+    target_elements: Sequence[str] = (),
 ) -> tuple[tuple[BalanceTerm, ...], tuple[BalanceTerm, ...], bool, tuple[str, ...]]:
     """Solve for a perfectly balanced hyperhomodesmotic reaction using MILP.
 
@@ -1065,14 +1107,23 @@ def build_hyperhomodesmotic_balance_terms(
         + [atom_delta.get(element, 0) for element in element_names]
     )
 
+    # Anything outside the target's own elements is a foreign carrier: a valid
+    # way to shuffle groups, but a chemist balancing a hydrocarbon does not want
+    # carboxylic acids in the answer. Priced rather than banned, because
+    # sometimes it is the only route.
+    foreign_cost = 2.0
+    home = set(target_elements)
+
     c = np.ones(2 * n_species)
-    for j, (species, _groups, _atoms) in enumerate(species_list):
+    for j, (species, _groups, atoms) in enumerate(species_list):
         heavy = sum(1 for char in species.smiles if char.isalpha() and char != "H")
         cost = 1.0
         if heavy == 1:
             cost = 1.02
         elif heavy == 2:
             cost = 1.01
+        if home and not set(atoms).issubset(home):
+            cost += foreign_cost
         c[j] = cost
         c[n_species + j] = cost
 
@@ -1095,6 +1146,14 @@ def build_hyperhomodesmotic_balance_terms(
     # off the left, and only relax it if nothing else balances at all.
     protected = [row_of[smiles] for smiles in set(reference_smiles) if smiles in row_of]
 
+    # The target sits on the left, so the same molecule added on the right
+    # cancels it, and what is left is a reaction the target takes no part in.
+    target_row = [
+        row
+        for smiles, row in row_of.items()
+        if target_smiles and canonical_smiles(smiles) == canonical_smiles(target_smiles)
+    ]
+
     # A requirement that cannot be met is dropped rather than failing the whole
     # run: a good balance the user cannot have still beats no balance at all.
     # Dropped one at a time, newest first, so a species that is fine on its own
@@ -1102,16 +1161,24 @@ def build_hyperhomodesmotic_balance_terms(
     res = None
     kept: list[int] = []
     dropped: list[int] = []
-    for banned in (protected, ()) if protected else ((),):
+    attempts = [(protected, target_row), ((), target_row), ((), ())]
+    for banned, banned_right in attempts:
         kept = list(required_rows)
         dropped = []
         res = _solve_with_required(
-            c, constraints, integrality, n_species, kept, banned, sides
+            c, constraints, integrality, n_species, kept, banned, sides, banned_right
         )
         while res is None and kept:
             dropped.append(kept.pop())
             res = _solve_with_required(
-                c, constraints, integrality, n_species, kept, banned, sides
+                c,
+                constraints,
+                integrality,
+                n_species,
+                kept,
+                banned,
+                sides,
+                banned_right,
             )
         if res is None:
             continue
@@ -1121,7 +1188,14 @@ def build_hyperhomodesmotic_balance_terms(
         # the answer no longer depends on the order they were added in.
         for row in list(reversed(dropped)):
             trial = _solve_with_required(
-                c, constraints, integrality, n_species, kept + [row], banned, sides
+                c,
+                constraints,
+                integrality,
+                n_species,
+                kept + [row],
+                banned,
+                sides,
+                banned_right,
             )
             if trial is not None:
                 kept.append(row)
@@ -1185,6 +1259,7 @@ def _solve_with_required(
     required_rows: Sequence[int],
     banned_left_rows: Sequence[int] = (),
     required_sides: Mapping[int, str] | None = None,
+    banned_right_rows: Sequence[int] = (),
 ) -> Any:
     """Cheapest MILP solution, pinning each required species to one side.
 
@@ -1239,6 +1314,8 @@ def _solve_with_required(
     lower = np.zeros(n_vars)
     for row in banned_left_rows:
         upper[row] = 0
+    for row in banned_right_rows:
+        upper[n_species + row] = 0
     for t, j in enumerate(required_rows):
         side = required_sides.get(j)
         if side == SIDE_LEFT:
@@ -1398,6 +1475,7 @@ def build_equation_text(
     lhs_bonds: Counter[str] | None = None,
     rhs_bonds: Counter[str] | None = None,
     user_input_lines: Sequence[str] = (),
+    is_identity: bool = False,
 ) -> str:
     if lhs_bonds is None:
         lhs_bonds = Counter()
@@ -1438,6 +1516,13 @@ def build_equation_text(
         "\n".join(bond_status_lines) if bond_status_lines else "  - No bonds detected"
     )
 
+    identity_text = (
+        "\nThis reaction is an identity: the target is already its own "
+        "reference, so the strain energy it measures is zero by construction.\n"
+        if is_identity
+        else ""
+    )
+
     user_input_text = (
         "\n".join(f"  - {line}" for line in user_input_lines)
         if user_input_lines
@@ -1447,7 +1532,8 @@ def build_equation_text(
     return (
         "Homodesmotic Draft Equation\n"
         "===========================\n\n"
-        f"{lhs} -> {rhs}\n\n"
+        f"{lhs} -> {rhs}\n"
+        f"{identity_text}\n"
         f"User-specified input:\n{user_input_text}\n\n"
         f"Reaction type: {reaction_type}\n"
         f"Hyperhomodesmotic condition: {hyper_status}\n"
@@ -1693,6 +1779,7 @@ def build_equation_html(
     lhs_bonds: Counter[str] | None = None,
     rhs_bonds: Counter[str] | None = None,
     user_input_lines: Sequence[str] = (),
+    is_identity: bool = False,
 ) -> str:
     """Build a styled HTML representation of the homodesmotic equation.
 
@@ -1771,6 +1858,14 @@ def build_equation_html(
             "none (all species are the built-in defaults)</p>"
         )
 
+    identity_html = (
+        '<p style="color:#fde293; font-weight:bold;">This reaction is an '
+        "identity: the target is already its own reference, so the strain "
+        "energy it measures is zero by construction.</p>"
+        if is_identity
+        else ""
+    )
+
     warning_html = ""
     if is_elemental_balance:
         warning_html = '<p style="color:#fde293; font-weight:bold;">⚠️ Note: Calculated in elemental balance mode due to environment matching constraints.</p>'
@@ -1807,7 +1902,7 @@ def build_equation_html(
     return (
         '<div style="font-family:Consolas, monospace; color:#e8eaed;">'
         '<h3 style="margin:0 0 8px 0; color:#e8eaed;">Homodesmotic Draft Equation</h3>'
-        f"{warning_html}"
+        f"{identity_html}{warning_html}"
         f'<p style="font-size:16px; font-weight:500; line-height:1.6; margin:16px 0;">{" + ".join(lhs_parts)} '
         f'<span style="color:#e8eaed;">-&gt;</span> {" + ".join(rhs_parts)}</p>'
         '<hr style="border:0; border-top:1px solid #3c4043;">'
