@@ -526,12 +526,16 @@ def _install_qt_stubs():
             self._text = text
             self._checked = False
             self._visible = True
+            self.toggled = _BoundSignal()
 
         def isChecked(self):
             return self._checked
 
         def setChecked(self, checked):
+            changed = self._checked != checked
             self._checked = checked
+            if changed:
+                self.toggled.emit(checked)
 
         def setVisible(self, visible):
             self._visible = visible

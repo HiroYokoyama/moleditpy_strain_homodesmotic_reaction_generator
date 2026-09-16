@@ -29,7 +29,12 @@ from strain_homodesmotic_reaction_generator.core import (  # noqa: E402
     is_valid_smiles,
     normalize_user_species,
 )
-from strain_homodesmotic_reaction_generator.data import UserSpecies  # noqa: E402
+from strain_homodesmotic_reaction_generator.data import (  # noqa: E402
+    SIDE_ANY,
+    SIDE_LEFT,
+    SIDE_RIGHT,
+    UserSpecies,
+)
 
 pytestmark = pytest.mark.skipif(Chem is None, reason="RDKit is not available")
 
@@ -517,11 +522,11 @@ def test_add_dialog_offers_the_reference_type_only_when_environments_exist():
 def test_add_dialog_shows_the_environment_combo_only_for_an_override():
     dialog = ui.AddSpeciesDialog(None, ("an environment",))
     assert dialog.environment_combo.isVisible() is False
-    assert dialog.required_check.isVisible() is True
+    assert dialog.use_combo.isVisible() is True
 
     dialog.type_combo.setCurrentText(ui._ADD_REFERENCE)
     assert dialog.environment_combo.isVisible() is True
-    assert dialog.required_check.isVisible() is False
+    assert dialog.use_combo.isVisible() is False
 
 
 def test_add_dialog_rejects_an_unparseable_smiles_without_closing():
@@ -539,11 +544,110 @@ def test_add_dialog_rejects_an_empty_smiles():
     assert "Enter a SMILES" in dialog.error_label.text()
 
 
+# ---------------------------------------------------------------------------
+# Choosing which side a required species lands on
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(core.milp is None, reason="SciPy is required for the MILP path")
+@pytest.mark.parametrize("side", [SIDE_LEFT, SIDE_RIGHT])
+def test_a_required_species_lands_on_the_side_you_name(side):
+    mol = Chem.MolFromSmiles("C1CCCC1")
+    result = analyze_molecule(
+        mol, user_species=[UserSpecies("CCCCCC", "hexane", True, side)]
+    )
+    on_left = any(
+        term.smiles == "CCCCCC" and term.count > 0 for term in result.left_balance_terms
+    )
+    on_right = any(
+        term.smiles == "CCCCCC" and term.count > 0
+        for term in result.right_balance_terms
+    )
+    assert (on_left, on_right) == (side == SIDE_LEFT, side == SIDE_RIGHT)
+    assert result.unmet_required == ()
+
+
+@pytest.mark.skipif(core.milp is None, reason="SciPy is required for the MILP path")
+def test_naming_a_side_still_balances_the_equation():
+    mol = Chem.MolFromSmiles("C1CCCC1")
+    result = analyze_molecule(
+        mol, user_species=[UserSpecies("CCCCCC", "hexane", True, SIDE_RIGHT)]
+    )
+    assert not result.unresolved_left_atoms
+    assert not result.unresolved_right_atoms
+    assert result.lhs_bonds.keys() | result.rhs_bonds.keys()
+    assert result.reaction_type in {"Hyperhomodesmotic", "Homodesmotic"}
+
+
+def test_the_side_is_quoted_in_the_report():
+    mol = Chem.MolFromSmiles("C1CCCC1")
+    result = analyze_molecule(
+        mol, user_species=[UserSpecies("CCCCCC", "hexane", True, SIDE_RIGHT)]
+    )
+    assert "[required, right]" in result.equation_text
+
+
+def test_an_optional_species_records_no_side():
+    kept, _rejected = normalize_user_species(
+        [UserSpecies("CCCCCC", "hexane", False, SIDE_LEFT)]
+    )
+    assert kept[0].required is False
+
+
+def test_the_use_list_offers_optional_alongside_the_constrained_choices():
+    """ "No constraint" is a choice in the list, not the state you get by
+    leaving a checkbox alone."""
+    dialog = ui.AddSpeciesDialog(None, ())
+    labels = [dialog.use_combo.itemText(i) for i in range(dialog.use_combo.count())]
+    assert labels[0] == ui._USE_OPTIONAL
+    assert [ui._USE_LABELS[label] for label in labels] == [
+        (False, SIDE_ANY),
+        (True, SIDE_ANY),
+        (True, SIDE_LEFT),
+        (True, SIDE_RIGHT),
+    ]
+
+
+def test_the_use_list_defaults_to_optional():
+    dialog = ui.AddSpeciesDialog(None, ())
+    assert dialog._selected_use() == (False, SIDE_ANY)
+
+
+def test_the_use_list_is_hidden_for_a_reference_override():
+    dialog = ui.AddSpeciesDialog(None, ("an environment",))
+    dialog.type_combo.setCurrentText(ui._ADD_REFERENCE)
+    assert dialog.use_combo.isVisible() is False
+
+
+def test_add_dialog_builds_a_side_pinned_entry():
+    dialog = ui.AddSpeciesDialog(None, ())
+    dialog.smiles_edit.setText("CCCCCC")
+    dialog.use_combo.setCurrentText("Required - right, with the references")
+    dialog.confirm()
+    _kind, species = dialog.entry
+    assert species == UserSpecies("CCCCCC", "", True, SIDE_RIGHT)
+
+
+def test_add_dialog_builds_an_optional_entry_with_no_side():
+    dialog = ui.AddSpeciesDialog(None, ())
+    dialog.smiles_edit.setText("CCCCCC")
+    dialog.confirm()
+    _kind, species = dialog.entry
+    assert species == UserSpecies("CCCCCC", "", False, SIDE_ANY)
+
+
+def test_edit_dialog_restores_the_use_choice():
+    dialog = ui.AddSpeciesDialog(
+        None, (), ("balance", UserSpecies("CCCCCC", "hexane", True, SIDE_RIGHT))
+    )
+    assert dialog._selected_use() == (True, SIDE_RIGHT)
+
+
 def test_add_dialog_builds_a_balance_entry():
     dialog = ui.AddSpeciesDialog(None, ())
     dialog.smiles_edit.setText("CCCCCCC")
     dialog.name_edit.setText("my heptane")
-    dialog.required_check.setChecked(True)
+    dialog.use_combo.setCurrentText("Required - either side")
     dialog.confirm()
     kind, species = dialog.entry
     assert kind == "balance"
@@ -638,7 +742,7 @@ def test_edit_dialog_starts_filled_in_from_a_balance_entry():
     )
     assert dialog.smiles_edit.text() == "CCCCCCC"
     assert dialog.name_edit.text() == "my heptane"
-    assert dialog.required_check.isChecked() is True
+    assert dialog._selected_use() == (True, SIDE_ANY)
     assert dialog.type_combo.currentText() == ui._ADD_BALANCE
 
 
@@ -751,48 +855,135 @@ def test_a_default_reference_can_be_edited_but_not_removed():
     dialog = _dialog()
     row = dialog._table_rows[_row_index(dialog, CP_DEFAULT_REFERENCE)]
     assert row["edit_entry"] is not None
-    assert row["removable"] is False
+    assert row["remove"] == (None, None)
 
 
-def test_a_solver_chosen_balance_species_can_be_neither():
+def test_removing_a_default_reference_says_there_is_nothing_to_remove():
     dialog = _dialog()
-    row = next(
-        data
-        for data in dialog._table_rows
-        if data["role"] in (ui._ROLE_LEFT, ui._ROLE_RIGHT)
-    )
-    assert row["edit_entry"] is None
-    assert row["removable"] is False
-
-
-def test_editing_a_solver_row_says_why_it_cannot():
-    dialog = _dialog()
-    row = next(
-        index
-        for index, data in enumerate(dialog._table_rows)
-        if data["role"] in (ui._ROLE_LEFT, ui._ROLE_RIGHT)
-    )
-    dialog.table.selectRows([row])
-    dialog.edit_selected_species()
-    assert any(
-        "can be edited" in message
-        for message, _timeout in dialog.context.status_messages
-    )
-
-
-def test_removing_a_solver_row_says_why_it_cannot():
-    dialog = _dialog()
-    row = next(
-        index
-        for index, data in enumerate(dialog._table_rows)
-        if data["role"] in (ui._ROLE_LEFT, ui._ROLE_RIGHT)
-    )
-    dialog.table.selectRows([row])
+    dialog.table.selectRows([_row_index(dialog, CP_DEFAULT_REFERENCE)])
     dialog.remove_selected_species()
     assert any(
-        "can be removed" in message
+        "nothing to remove" in message
         for message, _timeout in dialog.context.status_messages
     )
+
+
+def _solver_row(dialog):
+    return next(
+        (index, data)
+        for index, data in enumerate(dialog._table_rows)
+        if data["role"] in (ui._ROLE_LEFT, ui._ROLE_RIGHT)
+        and data["source"] == "default"
+    )
+
+
+def test_editing_a_solver_chosen_species_adopts_it_as_your_own_requirement():
+    """Answers "why can I add a species but not change the one it picked?"."""
+    dialog = _dialog()
+    _index, row = _solver_row(dialog)
+    kind, species = row["edit_entry"]
+    assert kind == "balance"
+    assert species.smiles == row["smiles"]
+    assert species.required is True
+
+
+def test_adopting_the_solver_choice_keeps_it_in_the_equation():
+    dialog = _dialog()
+    index, row = _solver_row(dialog)
+    smiles = row["smiles"]
+    dialog.apply_new_entry(row["edit_entry"])
+    dialog.refresh_analysis()
+    assert smiles in [data["smiles"] for data in dialog._table_rows]
+    assert [entry.smiles for entry in dialog.user_species] == [smiles]
+
+
+def test_removing_a_solver_chosen_species_excludes_it():
+    dialog = _dialog()
+    index, row = _solver_row(dialog)
+    smiles = row["smiles"]
+    dialog.table.selectRows([index])
+    dialog.remove_selected_species()
+    assert dialog.excluded == [smiles]
+
+    dialog.refresh_analysis()
+    used = [
+        data["smiles"]
+        for data in dialog._table_rows
+        if data["role"] in (ui._ROLE_LEFT, ui._ROLE_RIGHT)
+    ]
+    assert smiles not in used
+    assert dialog.last_result.excluded_species == (smiles,)
+
+
+def test_an_excluded_species_keeps_a_row_so_it_can_be_undone():
+    dialog = _dialog()
+    index, row = _solver_row(dialog)
+    smiles = row["smiles"]
+    dialog.table.selectRows([index])
+    dialog.remove_selected_species()
+    dialog.refresh_analysis()
+
+    excluded_row = dialog._table_rows[_row_index(dialog, smiles)]
+    assert excluded_row["source"] == ui._SOURCE_EXCLUDED
+    assert excluded_row["remove"] == ("unexclude", smiles)
+    assert excluded_row["edit_entry"] is None
+
+
+def test_removing_the_exclusion_row_lets_the_solver_use_it_again():
+    dialog = _dialog()
+    index, row = _solver_row(dialog)
+    smiles = row["smiles"]
+    dialog.table.selectRows([index])
+    dialog.remove_selected_species()
+    dialog.refresh_analysis()
+
+    dialog.table.selectRows([_row_index(dialog, smiles)])
+    dialog.remove_selected_species()
+    dialog.refresh_analysis()
+    assert dialog.excluded == []
+    assert smiles in [data["smiles"] for data in dialog._table_rows]
+
+
+def test_editing_an_excluded_row_says_why_it_cannot():
+    dialog = _dialog()
+    index, row = _solver_row(dialog)
+    dialog.table.selectRows([index])
+    dialog.remove_selected_species()
+    dialog.refresh_analysis()
+
+    dialog.table.selectRows([_row_index(dialog, row["smiles"])])
+    dialog.edit_selected_species()
+    assert any(
+        "nothing to edit" in message
+        for message, _timeout in dialog.context.status_messages
+    )
+
+
+def test_adding_back_a_species_you_excluded_lifts_the_exclusion():
+    dialog = _dialog()
+    index, row = _solver_row(dialog)
+    smiles = row["smiles"]
+    dialog.table.selectRows([index])
+    dialog.remove_selected_species()
+    dialog.apply_new_entry(("balance", UserSpecies(smiles, "back", True)))
+    assert dialog.excluded == []
+
+
+def test_reset_clears_exclusions_too():
+    dialog = _dialog()
+    index, _row = _solver_row(dialog)
+    dialog.table.selectRows([index])
+    dialog.remove_selected_species()
+    dialog.reset_species()
+    assert dialog.excluded == []
+
+
+def test_a_staged_exclusion_counts_as_a_pending_change():
+    dialog = _dialog()
+    index, _row = _solver_row(dialog)
+    dialog.table.selectRows([index])
+    dialog.remove_selected_species()
+    assert dialog.pending_label.isVisible() is True
 
 
 def test_double_clicking_a_row_opens_its_edit_dialog(monkeypatch):
@@ -1080,7 +1271,7 @@ def test_an_unused_species_still_gets_a_row():
     assert row["role"] == ui._ROLE_UNUSED
     assert row["source"] == ui._SOURCE_NOT_USED
     assert row["count"] is None
-    assert row["removable"] is True
+    assert row["remove"][0] == "forget"
 
 
 @pytest.mark.skipif(core.milp is None, reason="SciPy is required for the MILP path")
@@ -1096,7 +1287,7 @@ def test_a_cancelled_override_keeps_a_row_saying_so():
     dialog = _apply(_dialog(), ("reference", CP_ENVIRONMENT, "c1ccccc1"))
     row = dialog._table_rows[_row_index(dialog, "c1ccccc1")]
     assert row["source"] == ui._SOURCE_CANCELLED
-    assert row["removable"] is True
+    assert row["remove"][0] == "forget"
 
 
 def test_an_override_for_an_undetected_environment_says_so():

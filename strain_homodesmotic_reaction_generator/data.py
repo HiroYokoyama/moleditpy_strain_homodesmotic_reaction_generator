@@ -26,17 +26,25 @@ class BalanceSpecies:
     description: str
 
 
+#: ``side`` values for a required species. Empty means the solver decides.
+SIDE_ANY = ""
+SIDE_LEFT = "left"
+SIDE_RIGHT = "right"
+
+
 @dataclass(frozen=True)
 class UserSpecies:
     """A balance species typed by the user.
 
     ``smiles`` is kept verbatim so reports quote what was entered rather than
-    RDKit's canonical form. ``required`` forces the solver to use it.
+    RDKit's canonical form. ``required`` forces the solver to use it, and
+    ``side`` pins which side of the arrow it has to appear on.
     """
 
     smiles: str
     name: str = ""
     required: bool = False
+    side: str = SIDE_ANY
 
     def as_balance_species(self) -> "BalanceSpecies":
         return BalanceSpecies(

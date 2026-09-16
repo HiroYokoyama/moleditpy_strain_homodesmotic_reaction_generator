@@ -19,7 +19,7 @@ Repo: [https://github.com/HiroYokoyama/moleditpy_strain_homodesmotic_reaction_ge
 - **Expanded Support**: Auto-detects and balances ketones, aldehydes, amines (primary, secondary, tertiary), and extended alkanes.
 - **MILP Optimization**: Uses mixed-integer linear programming (MILP) via SciPy to find the optimal set of balance species.
 - **Robust Fallback**: Displays a warning and falls back to simple elemental balance mode if SciPy is not installed or environment constraints prevent exact homodesmotic balancing.
-- **Your Own Species**: Add balance species of your own, mark one **Required** to force it into the equation, or override the reference molecule proposed for an environment. The reaction type is re-derived from whatever equation your choices produce, so a substitution that breaks the balance is reported as broken rather than accepted.
+- **Your Own Species**: Add balance species of your own, mark one **Required** to force it into the equation, override the reference molecule proposed for an environment, or exclude a species you cannot compute so the solver works around it. The reaction type is re-derived from whatever equation your choices produce, so a substitution that breaks the balance is reported as broken rather than accepted.
 - **Interactive UI**: One table holds the whole draft - references, balance species, and any entry of yours the equation could not use. Sort by any column, load a species back into MoleditPy, and export as CSV, HTML, or TXT.
 
 ## Files
@@ -42,15 +42,25 @@ Download from MoleditPy [Plugin Explorer](https://hiroyokoyama.github.io/moledit
    - **Balance species** joins the library the solver may draw on. Tick **Required** to force it into the equation.
    - **Reference molecule override** replaces the molecule proposed for one detected environment.
 
-   Double-click a row (or select it and press **Edit Selected...**) to change it, **Remove Selected** to drop one of yours, and **Reset to Defaults** to clear them all. The cells themselves are read-only, so an edit can never silently do nothing.
+   Double-click a row (or select it and press **Edit Selected...**) to change it, and **Reset to Defaults** to clear everything. The cells themselves are read-only, so an edit can never silently do nothing.
+
+   Both buttons work on the solver's own rows too:
+
+   | Row | **Edit Selected...** | **Remove Selected** |
+   |---|---|---|
+   | A reference molecule | substitute it for this environment | revert to the built-in default |
+   | A balance species the solver chose | adopt it as your own **Required** entry, or change the SMILES to require something else | exclude it, so the solver balances without it |
+   | One of your own entries | change its SMILES, name or Required flag | drop it |
+   | An excluded species | - | lift the exclusion |
 6. Press **Analyze** again to apply. Changes are staged rather than applied as you type, because a full re-analysis takes seconds on a large molecule; a banner counts what is waiting.
 7. Export the analysis as CSV, HTML, or text if needed. Sample report is available [here](./sample/strain_homodesmotic_reaction_draft_sample.html).
 
-The **Source** column says where each row came from, including the two ways a
+The **Source** column says where each row came from, including the ways a
 request can fail quietly: `yours, cannot be placed` for a required species no
-balance can use, and `yours, cancelled out` for a reference the solver had to
-cancel against itself, which leaves a balanced equation that no longer says
-anything about that environment.
+balance can use, `yours, cancelled out` for a reference the solver had to
+cancel against itself (which leaves a balanced equation that no longer says
+anything about that environment), and `excluded, but unavoidable` for an
+exclusion that left nothing balanceable at all.
 
 HTML export preserves the dialog color coding:
 

@@ -12,7 +12,6 @@ try:
     from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
     from PyQt6.QtWidgets import (
         QAbstractItemView,
-        QCheckBox,
         QComboBox,
         QDialog,
         QFileDialog,
@@ -34,7 +33,6 @@ except ImportError:  # pragma: no cover
     pyqtSignal = None  # type: ignore[assignment]
     QObject = None  # type: ignore[assignment]
     QAbstractItemView = None  # type: ignore[assignment]
-    QCheckBox = None  # type: ignore[assignment]
     QComboBox = None  # type: ignore[assignment]
     QDialog = None  # type: ignore[assignment]
     QFileDialog = None  # type: ignore[assignment]
@@ -57,7 +55,7 @@ from .core import (
     is_valid_smiles,
     milp,
 )
-from .data import ENVIRONMENTS, UserSpecies
+from .data import ENVIRONMENTS, SIDE_ANY, SIDE_LEFT, SIDE_RIGHT, UserSpecies
 
 WINDOW_ID = "strain_homodesmotic_reaction_generator"
 
@@ -98,6 +96,8 @@ _SOURCE_NOT_USED = "yours, not used"
 _SOURCE_UNPLACEABLE = "yours, cannot be placed"
 _SOURCE_CANCELLED = "yours, cancelled out"
 _SOURCE_NO_ENVIRONMENT = "yours, no such environment"
+_SOURCE_EXCLUDED = "excluded by you"
+_SOURCE_FORCED = "excluded, but unavoidable"
 
 _COLUMNS = ("Role", "Environment / Species", "Count", "SMILES", "Source", "Action")
 _COL_ROLE = 0
@@ -109,6 +109,17 @@ _COL_ACTION = 5
 
 _ADD_BALANCE = "Balance species"
 _ADD_REFERENCE = "Reference molecule override"
+
+#: How a balance species may be used. One list rather than a checkbox plus a
+#: side, so "no constraint" sits alongside the constrained choices instead of
+#: being the state you get by leaving something untouched.
+_USE_OPTIONAL = "Optional - the solver may use it"
+_USE_LABELS = {
+    _USE_OPTIONAL: (False, SIDE_ANY),
+    "Required - either side": (True, SIDE_ANY),
+    "Required - left, with the target": (True, SIDE_LEFT),
+    "Required - right, with the references": (True, SIDE_RIGHT),
+}
 
 
 def _empty_result(message: str = "") -> AnalysisResult:
@@ -172,16 +183,21 @@ if QDialog is not None:
             mol: Any,
             reference_overrides: dict[str, str] | None = None,
             user_species: tuple[UserSpecies, ...] = (),
+            excluded: tuple[str, ...] = (),
         ) -> None:
             super().__init__()
             self.mol = mol
             self.reference_overrides = dict(reference_overrides or {})
             self.user_species = tuple(user_species)
+            self.excluded = tuple(excluded)
 
         def run(self) -> None:
             try:
                 result = analyze_molecule(
-                    self.mol, self.reference_overrides, self.user_species
+                    self.mol,
+                    self.reference_overrides,
+                    self.user_species,
+                    self.excluded,
                 )
                 self.finished.emit(result)
             except Exception as e:
@@ -268,10 +284,14 @@ if QDialog is not None:
             name_row.addWidget(self.name_edit, 1)
             layout.addLayout(name_row)
 
-            self.required_check = QCheckBox(
-                "Required (the balance must actually use it)"
-            )
-            layout.addWidget(self.required_check)
+            self.use_row = QHBoxLayout()
+            self.use_label = self._field_label("Use:")
+            self.use_row.addWidget(self.use_label)
+            self.use_combo = QComboBox()
+            for label in _USE_LABELS:
+                self.use_combo.addItem(label)
+            self.use_row.addWidget(self.use_combo, 1)
+            layout.addLayout(self.use_row)
 
             self.error_label = QLabel("")
             self.error_label.setStyleSheet("color: #f28b82; font-weight: bold;")
@@ -328,7 +348,10 @@ if QDialog is not None:
                 self.type_combo.setCurrentText(_ADD_BALANCE)
                 self.smiles_edit.setText(species.smiles)
                 self.name_edit.setText(species.name)
-                self.required_check.setChecked(species.required)
+                for label, use in _USE_LABELS.items():
+                    if use == (species.required, species.side):
+                        self.use_combo.setCurrentText(label)
+                        break
             self.type_combo.setEnabled(False)
 
         def _on_type_changed(self, text: str) -> None:
@@ -336,7 +359,12 @@ if QDialog is not None:
             self.environment_label.setVisible(is_reference)
             self.environment_combo.setVisible(is_reference)
             self.name_edit.setVisible(not is_reference)
-            self.required_check.setVisible(not is_reference)
+            self.use_label.setVisible(not is_reference)
+            self.use_combo.setVisible(not is_reference)
+
+        def _selected_use(self) -> tuple[bool, str]:
+            """(required, side) for the chosen entry in the Use list."""
+            return _USE_LABELS.get(self.use_combo.currentText(), (False, SIDE_ANY))
 
         def confirm(self) -> None:
             smiles = self.smiles_edit.text().strip()
@@ -349,13 +377,10 @@ if QDialog is not None:
             if self.type_combo.currentText() == _ADD_REFERENCE:
                 self.entry = ("reference", self.environment_combo.currentText(), smiles)
             else:
+                required, side = self._selected_use()
                 self.entry = (
                     "balance",
-                    UserSpecies(
-                        smiles,
-                        self.name_edit.text().strip(),
-                        self.required_check.isChecked(),
-                    ),
+                    UserSpecies(smiles, self.name_edit.text().strip(), required, side),
                 )
             self.accept()
 
@@ -374,6 +399,7 @@ if QDialog is not None:
             self.last_result = _empty_result()
             self.reference_overrides: dict[str, str] = {}
             self.user_species: list[UserSpecies] = []
+            self.excluded: list[str] = []
             self._table_rows: list[dict] = []
             self._sort_state: tuple[int, bool] | None = None
 
@@ -449,6 +475,15 @@ if QDialog is not None:
             button_row.addWidget(self.export_button)
             layout.addLayout(button_row)
 
+            self.edit_species_button.setToolTip(
+                "Substitute a reference molecule, or adopt a balance species "
+                "the solver picked as your own requirement."
+            )
+            self.remove_species_button.setToolTip(
+                "Drop one of your entries, or keep the solver's pick out of "
+                "the balance library entirely."
+            )
+
             self.add_species_button.clicked.connect(self.add_species)
             self.edit_species_button.clicked.connect(self.edit_selected_species)
             self.remove_species_button.clicked.connect(self.remove_selected_species)
@@ -497,7 +532,8 @@ if QDialog is not None:
             if existing is None:
                 _status(
                     self.context,
-                    "Only reference molecules and your own species can be edited.",
+                    "An excluded species has nothing to edit; remove the "
+                    "exclusion to let the solver use it again.",
                     4000,
                 )
                 return
@@ -512,22 +548,30 @@ if QDialog is not None:
             if row is None:
                 _status(self.context, "Select one row to remove.", 3000)
                 return
-            if not row["removable"]:
+            action, key = row["remove"]
+            if action is None:
                 _status(
                     self.context,
-                    "That row is part of the generated draft; only your own "
-                    "entries can be removed.",
+                    "This reference is the built-in default; there is nothing "
+                    "to remove.",
                     4000,
                 )
                 return
-            self._forget_entry(row["edit_entry"])
+            if action == "exclude":
+                self.excluded.append(key)
+                _status(self.context, f"{key} excluded from the balance library.", 3000)
+            elif action == "unexclude":
+                self.excluded = [s for s in self.excluded if s != key]
+            else:
+                self._forget_entry(key)
             self._stage()
 
         def reset_species(self) -> None:
-            if not self.reference_overrides and not self.user_species:
+            if not (self.reference_overrides or self.user_species or self.excluded):
                 return
             self.reference_overrides = {}
             self.user_species = []
+            self.excluded = []
             self._stage()
 
         def apply_new_entry(self, entry: tuple, replacing: tuple | None = None) -> None:
@@ -543,6 +587,7 @@ if QDialog is not None:
                 self.reference_overrides[name] = smiles
             else:
                 species = entry[1]
+                self.excluded = [s for s in self.excluded if s != species.smiles]
                 self.user_species = [
                     existing
                     for existing in self.user_species
@@ -581,6 +626,7 @@ if QDialog is not None:
 
             analyzed = {key(s) for s in self.last_result.user_species}
             current = {key(s) for s in self.user_species}
+            changed |= set(self.last_result.excluded_species) ^ set(self.excluded)
             return len(changed) + len({entry[0] for entry in analyzed ^ current})
 
         def _update_pending(self) -> None:
@@ -641,7 +687,10 @@ if QDialog is not None:
 
             self.analysis_thread = QThread()
             self.worker = AnalysisWorker(
-                mol, dict(self.reference_overrides), tuple(self.user_species)
+                mol,
+                dict(self.reference_overrides),
+                tuple(self.user_species),
+                tuple(self.excluded),
             )
             self.worker.moveToThread(self.analysis_thread)
 
@@ -682,6 +731,12 @@ if QDialog is not None:
                     + ", ".join(result.cancelled_references)
                     + " cancelled out, so the equation no longer covers that "
                     "environment."
+                )
+            if result.ignored_exclusions:
+                messages.append(
+                    "Nothing balances without "
+                    + ", ".join(result.ignored_exclusions)
+                    + ", so it was used anyway."
                 )
             if result.unmet_required:
                 messages.append(
@@ -758,7 +813,11 @@ if QDialog is not None:
                         "tooltip": match.description,
                         "user": overridden or match.user_defined,
                         "edit_entry": ("reference", match.name, current),
-                        "removable": overridden,
+                        "remove": (
+                            ("forget", ("reference", match.name, current))
+                            if overridden
+                            else (None, None)
+                        ),
                     }
                 )
 
@@ -789,6 +848,24 @@ if QDialog is not None:
                         source = _SOURCE_REMOVED
                     else:
                         source = _SOURCE_YOURS
+                    if species is not None:
+                        edit_entry = ("balance", species)
+                        remove = ("forget", edit_entry)
+                        tooltip = term.description or fallback
+                    else:
+                        # Editing the solver's own pick means adopting it: the
+                        # dialog opens on that molecule, required, so changing
+                        # the SMILES swaps what the balance is allowed to use.
+                        edit_entry = (
+                            "balance",
+                            UserSpecies(term.smiles, term.name, True),
+                        )
+                        remove = ("exclude", term.smiles)
+                        tooltip = (
+                            f"{term.description or fallback}\n"
+                            "Edit to require this molecule (or a different one) "
+                            "here; Remove to keep it out of the balance entirely."
+                        )
                     rows.append(
                         {
                             "role": role,
@@ -796,12 +873,10 @@ if QDialog is not None:
                             "count": term.count,
                             "smiles": term.smiles,
                             "source": source,
-                            "tooltip": term.description or fallback,
+                            "tooltip": tooltip,
                             "user": term.user_defined,
-                            "edit_entry": (
-                                ("balance", species) if species is not None else None
-                            ),
-                            "removable": species is not None,
+                            "edit_entry": edit_entry,
+                            "remove": remove,
                         }
                     )
 
@@ -858,7 +933,7 @@ if QDialog is not None:
                         ),
                         "user": True,
                         "edit_entry": ("reference", name, smiles),
-                        "removable": True,
+                        "remove": ("forget", ("reference", name, smiles)),
                     }
                 )
 
@@ -888,7 +963,35 @@ if QDialog is not None:
                         ),
                         "user": True,
                         "edit_entry": ("balance", species),
-                        "removable": True,
+                        "remove": ("forget", ("balance", species)),
+                    }
+                )
+
+            ignored = set(result.ignored_exclusions)
+            for smiles in self.excluded:
+                forced = smiles in ignored
+                rows.append(
+                    {
+                        "role": _ROLE_UNUSED,
+                        "name": smiles,
+                        "count": None,
+                        "smiles": smiles,
+                        "source": (
+                            _SOURCE_FORCED
+                            if forced
+                            else _SOURCE_EXCLUDED
+                            if smiles in set(result.excluded_species)
+                            else _SOURCE_PENDING
+                        ),
+                        "tooltip": (
+                            "Nothing balances without it, so the exclusion was ignored."
+                            if forced
+                            else "Kept out of the balance library. Remove this "
+                            "row to let the solver use it again."
+                        ),
+                        "user": True,
+                        "edit_entry": None,
+                        "remove": ("unexclude", smiles),
                     }
                 )
             return rows
