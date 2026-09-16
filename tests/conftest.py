@@ -217,7 +217,27 @@ def _install_qt_stubs():
             self._text = text
             self._enabled = True
             self._tooltip = ""
+            self._default = False
+            self._auto_default = True
             self.clicked = _BoundSignal()
+
+        def setDefault(self, is_default):
+            self._default = is_default
+
+        def isDefault(self):
+            return self._default
+
+        def setAutoDefault(self, auto):
+            self._auto_default = auto
+
+        def setStyleSheet(self, style):
+            self._stylesheet = style
+
+        def styleSheet(self):
+            return getattr(self, "_stylesheet", "")
+
+        def autoDefault(self):
+            return self._auto_default
 
         def setEnabled(self, enabled):
             self._enabled = enabled
@@ -487,6 +507,12 @@ def _install_qt_stubs():
 
         def setPlaceholderText(self, text):
             self._placeholder = text
+
+        def setFocus(self):
+            self._focused = True
+
+        def hasFocus(self):
+            return getattr(self, "_focused", False)
 
         def setVisible(self, visible):
             self._visible = visible

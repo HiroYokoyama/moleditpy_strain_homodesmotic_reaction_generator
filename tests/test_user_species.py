@@ -659,6 +659,23 @@ def test_edit_dialog_offers_an_environment_that_is_no_longer_detected():
     assert dialog.environment_combo.currentText() == "gone"
 
 
+@pytest.mark.parametrize(
+    "existing", [None, ("balance", UserSpecies("CC"))], ids=["add", "edit"]
+)
+def test_enter_confirms_the_dialog(existing):
+    dialog = ui.AddSpeciesDialog(None, (), existing)
+    assert dialog.add_button.isDefault() is True
+    assert dialog.cancel_button.autoDefault() is False
+
+
+@pytest.mark.parametrize(
+    "existing", [None, ("balance", UserSpecies("CC"))], ids=["add", "edit"]
+)
+def test_the_smiles_field_starts_focused(existing):
+    dialog = ui.AddSpeciesDialog(None, (), existing)
+    assert dialog.smiles_edit.hasFocus() is True
+
+
 def test_edit_dialog_says_save_and_locks_the_type():
     dialog = ui.AddSpeciesDialog(None, (), ("balance", UserSpecies("CC")))
     assert dialog.add_button._text == "Save"
@@ -992,6 +1009,17 @@ def test_the_banner_counts_several_staged_changes():
 def test_analyzing_clears_the_pending_banner():
     dialog = _apply(_dialog(), ("balance", UserSpecies("CCCCCCC", "heptane")))
     assert dialog.pending_label.isVisible() is False
+
+
+def test_the_analyze_button_is_highlighted_while_edits_are_waiting():
+    dialog = _dialog()
+    assert dialog.analyze_button.styleSheet() == ""
+
+    dialog.apply_new_entry(("balance", UserSpecies("CCCCCCC", "heptane")))
+    assert ui._USER_COLOR in dialog.analyze_button.styleSheet()
+
+    dialog.refresh_analysis()
+    assert dialog.analyze_button.styleSheet() == ""
 
 
 def test_a_staged_override_shows_on_the_reference_row_as_pending():

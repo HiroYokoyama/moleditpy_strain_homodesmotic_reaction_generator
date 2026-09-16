@@ -85,6 +85,12 @@ _ROLE_COLORS = {
 #: Everything the user typed shares one colour, matching the exported report.
 _USER_COLOR = "#ff8a65"
 
+#: Analyze wears that colour while edits are waiting, so the button that
+#: applies them is the one thing on screen that has changed.
+_PENDING_BUTTON_STYLE = (
+    f"background-color: {_USER_COLOR}; color: #202124; font-weight: bold;"
+)
+
 _SOURCE_YOURS = "yours"
 _SOURCE_PENDING = "yours, pending"
 _SOURCE_REMOVED = "removed, pending"
@@ -276,6 +282,11 @@ if QDialog is not None:
             button_row.addStretch()
             self.cancel_button = QPushButton("Cancel")
             self.add_button = QPushButton("Save" if existing else "Add")
+            # Enter confirms: the whole dialog is one SMILES and a couple of
+            # options, so reaching for the mouse to commit it is friction.
+            self.add_button.setDefault(True)
+            self.add_button.setAutoDefault(True)
+            self.cancel_button.setAutoDefault(False)
             button_row.addWidget(self.cancel_button)
             button_row.addWidget(self.add_button)
             layout.addLayout(button_row)
@@ -285,6 +296,7 @@ if QDialog is not None:
             self.add_button.clicked.connect(self.confirm)
             self._prefill()
             self._on_type_changed(self.type_combo.currentText())
+            self.smiles_edit.setFocus()
             self.resize(460, 240)
 
         @staticmethod
@@ -416,7 +428,7 @@ if QDialog is not None:
             self.table.itemDoubleClicked.connect(self._on_row_double_clicked)
             # The draft is the point of the window; the table is how you steer
             # it, so the report gets the room when the dialog is resized.
-            self.table.setMaximumHeight(260)
+            self.table.setMaximumHeight(520)
             layout.addWidget(self.table, 1)
 
             button_row = QHBoxLayout()
@@ -577,6 +589,7 @@ if QDialog is not None:
                     "press Analyze to apply."
                 )
             self.pending_label.setVisible(bool(pending))
+            self.analyze_button.setStyleSheet(_PENDING_BUTTON_STYLE if pending else "")
 
         def _forget_entry(self, entry: tuple | None) -> None:
             if entry is None:
