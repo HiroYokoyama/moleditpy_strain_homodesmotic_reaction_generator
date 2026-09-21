@@ -5,6 +5,8 @@
 PyQt6 user interface for Strain Homodesmotic Reaction Generator.
 """
 
+from __future__ import annotations
+
 from collections import Counter
 from typing import Any
 
