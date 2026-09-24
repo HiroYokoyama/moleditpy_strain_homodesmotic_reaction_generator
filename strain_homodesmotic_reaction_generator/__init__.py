@@ -14,7 +14,7 @@ from .ui import (
 )
 
 PLUGIN_NAME = "Strain Homodesmotic Reaction Generator"
-PLUGIN_VERSION = "0.9.1"
+PLUGIN_VERSION = "0.10.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 PLUGIN_DEPENDENCIES = ("numpy", "scipy")
 PLUGIN_DESCRIPTION = (

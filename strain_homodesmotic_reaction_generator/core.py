@@ -363,6 +363,10 @@ def classify_sides(
 
     if lhs_atoms != rhs_atoms:
         return "Unbalanced"
+    # Atoms alone do not conserve electrons: [Na+] -> [Na] balances every
+    # element and would otherwise pass as hyperhomodesmotic.
+    if _side_charge(lhs_mols) != _side_charge(rhs_mols):
+        return "Unbalanced"
 
     # 2. Hyperhomodesmotic check (LHS hybridized bonds == RHS hybridized bonds)
     def get_hybridized_bonds(m: Any) -> Counter[str]:
@@ -419,6 +423,14 @@ def classify_sides(
         return "Isodesmic"
 
     return "Elemental Balance"
+
+
+def _side_charge(mols: Sequence[tuple[Any, int]]) -> int:
+    """Net formal charge of one side, from (molecule, coefficient) pairs."""
+    return sum(
+        count * sum(atom.GetFormalCharge() for atom in mol.GetAtoms())
+        for mol, count in mols
+    )
 
 
 def explicit_hydrogen_copy(mol: Any) -> Any:
@@ -621,18 +633,20 @@ def analyze_molecule(
         )
 
     # Algebraic cancellation of identical reference molecules on both sides
+    # Keyed by molecule, not spelling: the library's CCOC and the reference
+    # COCC are the same ether and must cancel.
     lhs_counts = Counter()
     for term in left_balance_terms:
         if term.count > 0:
-            lhs_counts[term.smiles] += term.count
+            lhs_counts[canonical_smiles(term.smiles)] += term.count
 
     rhs_counts = Counter()
     for term in rhs_terms:
         if term.count > 0:
-            rhs_counts[term.smiles] += term.count
+            rhs_counts[canonical_smiles(term.smiles)] += term.count
     for term in right_balance_terms:
         if term.count > 0:
-            rhs_counts[term.smiles] += term.count
+            rhs_counts[canonical_smiles(term.smiles)] += term.count
 
     cancellations = Counter()
     for smiles, l_count in lhs_counts.items():
@@ -642,7 +656,7 @@ def analyze_molecule(
 
     new_left_balance_terms = []
     for term in left_balance_terms:
-        cancel_qty = cancellations.get(term.smiles, 0)
+        cancel_qty = cancellations.get(canonical_smiles(term.smiles), 0)
         new_count = max(0, term.count - cancel_qty)
         new_left_balance_terms.append(
             BalanceTerm(
@@ -657,11 +671,12 @@ def analyze_molecule(
     new_right_balance_terms = []
     rhs_cancel_remaining = Counter(cancellations)
     for term in right_balance_terms:
-        cancel_qty = rhs_cancel_remaining.get(term.smiles, 0)
+        key = canonical_smiles(term.smiles)
+        cancel_qty = rhs_cancel_remaining.get(key, 0)
         if cancel_qty > 0:
             sub = min(term.count, cancel_qty)
             new_count = term.count - sub
-            rhs_cancel_remaining[term.smiles] -= sub
+            rhs_cancel_remaining[key] -= sub
         else:
             new_count = term.count
         new_right_balance_terms.append(
@@ -677,11 +692,12 @@ def analyze_molecule(
     new_rhs_terms = []
     new_matches = []
     for rhs_term, match in zip(rhs_terms, matches):
-        cancel_qty = rhs_cancel_remaining.get(rhs_term.smiles, 0)
+        key = canonical_smiles(rhs_term.smiles)
+        cancel_qty = rhs_cancel_remaining.get(key, 0)
         if cancel_qty > 0:
             sub = min(rhs_term.count, cancel_qty)
             new_count = rhs_term.count - sub
-            rhs_cancel_remaining[rhs_term.smiles] -= sub
+            rhs_cancel_remaining[key] -= sub
         else:
             new_count = rhs_term.count
         new_rhs_terms.append(
@@ -872,8 +888,15 @@ def species_atom_counts(smiles: str) -> Counter[str]:
     return atom_counts(explicit_hydrogen_copy(mol))
 
 
+@lru_cache(maxsize=4096)
 def canonical_smiles(smiles: str) -> str:
-    """RDKit's canonical form, or the input unchanged if it will not parse."""
+    """RDKit's canonical form, or the input unchanged if it will not parse.
+
+    This is the identity used whenever two species are compared. The library
+    and the reference table write the same molecule in different ways (``CCOC``
+    and ``COCC`` are both ethyl methyl ether), and comparing the strings let
+    one molecule sit on both sides of the arrow uncancelled.
+    """
     if Chem is None or not smiles:
         return smiles
     mol = Chem.MolFromSmiles(smiles)
@@ -905,14 +928,15 @@ def normalize_user_species(
         if not is_valid_smiles(smiles):
             rejected.append(entry.smiles)
             continue
-        if smiles in seen:
-            index = seen[smiles]
+        key = canonical_smiles(smiles)
+        if key in seen:
+            index = seen[key]
             if entry.required and not kept[index].required:
                 kept[index] = UserSpecies(
                     kept[index].smiles, kept[index].name, True, entry.side
                 )
             continue
-        seen[smiles] = len(kept)
+        seen[key] = len(kept)
         kept.append(UserSpecies(smiles, entry.name.strip(), entry.required, entry.side))
     return tuple(kept), tuple(rejected)
 
@@ -1031,16 +1055,23 @@ def balance_pool(
     Anything in *excluded_smiles* is left out of the pool entirely: a species
     whose energy the user cannot compute is no use in their reaction.
     """
-    banned = {smiles for smiles in excluded_smiles if smiles}
-    pool = [species for species in BALANCE_SPECIES if species.smiles not in banned]
-    known = {species.smiles for species in pool}
+    # Everything is compared as canonical SMILES; the returned set holds
+    # canonical keys, so test membership with canonical_smiles().
+    banned = {canonical_smiles(smiles) for smiles in excluded_smiles if smiles}
+    pool = [
+        species
+        for species in BALANCE_SPECIES
+        if canonical_smiles(species.smiles) not in banned
+    ]
+    known = {canonical_smiles(species.smiles) for species in pool}
     user_smiles = set()
     for species in extra_species:
-        if species.smiles in banned:
+        key = canonical_smiles(species.smiles)
+        if key in banned:
             continue
-        user_smiles.add(species.smiles)
-        if species.smiles not in known:
-            known.add(species.smiles)
+        user_smiles.add(key)
+        if key not in known:
+            known.add(key)
             pool.append(species)
     return tuple(pool), frozenset(user_smiles)
 
@@ -1130,13 +1161,22 @@ def build_hyperhomodesmotic_balance_terms(
     integrality = np.ones(2 * n_species)
     constraints = [LinearConstraint(A_eq, b_eq, b_eq)]
 
-    row_of = {species.smiles: j for j, (species, _g, _a) in enumerate(species_list)}
-    required_rows = [row_of[smiles] for smiles in required if smiles in row_of]
-    unplaceable = tuple(smiles for smiles in required if smiles not in row_of)
+    row_of = {
+        canonical_smiles(species.smiles): j
+        for j, (species, _g, _a) in enumerate(species_list)
+    }
+    required_rows = [
+        row_of[canonical_smiles(smiles)]
+        for smiles in required
+        if canonical_smiles(smiles) in row_of
+    ]
+    unplaceable = tuple(
+        smiles for smiles in required if canonical_smiles(smiles) not in row_of
+    )
     sides = {
-        row_of[smiles]: side
+        row_of[canonical_smiles(smiles)]: side
         for smiles, side in (required_sides or {}).items()
-        if smiles in row_of
+        if canonical_smiles(smiles) in row_of
     }
 
     # A reference molecule added to the left just cancels the copies on the
@@ -1144,14 +1184,20 @@ def build_hyperhomodesmotic_balance_terms(
     # cheapest solution and always a useless one: it leaves a balanced equation
     # with nothing left to say about the strained environment. Keep references
     # off the left, and only relax it if nothing else balances at all.
-    protected = [row_of[smiles] for smiles in set(reference_smiles) if smiles in row_of]
+    protected = sorted(
+        {
+            row_of[canonical_smiles(smiles)]
+            for smiles in reference_smiles
+            if canonical_smiles(smiles) in row_of
+        }
+    )
 
     # The target sits on the left, so the same molecule added on the right
     # cancels it, and what is left is a reaction the target takes no part in.
     target_row = [
         row
-        for smiles, row in row_of.items()
-        if target_smiles and canonical_smiles(smiles) == canonical_smiles(target_smiles)
+        for key, row in row_of.items()
+        if target_smiles and key == canonical_smiles(target_smiles)
     ]
 
     # A requirement that cannot be met is dropped rather than failing the whole
@@ -1224,7 +1270,7 @@ def build_hyperhomodesmotic_balance_terms(
                     species.smiles,
                     int(count),
                     description=species.description,
-                    user_defined=species.smiles in user_smiles,
+                    user_defined=canonical_smiles(species.smiles) in user_smiles,
                 )
             )
 
@@ -1238,7 +1284,7 @@ def build_hyperhomodesmotic_balance_terms(
                     species.smiles,
                     int(count),
                     description=species.description,
-                    user_defined=species.smiles in user_smiles,
+                    user_defined=canonical_smiles(species.smiles) in user_smiles,
                 )
             )
 
@@ -1355,9 +1401,9 @@ def build_balance_terms(
     remaining = Counter(needed_atoms)
     seeded: Counter[BalanceSpecies] = Counter()
     unmet: list[str] = []
-    by_smiles = {species.smiles: species for species in pool}
+    by_smiles = {canonical_smiles(species.smiles): species for species in pool}
     for smiles in required_smiles:
-        species = by_smiles.get(smiles)
+        species = by_smiles.get(canonical_smiles(smiles))
         if species is None:
             unmet.append(smiles)
             continue
@@ -1409,7 +1455,7 @@ def _balance_terms_from(
             species.smiles,
             count,
             description=species.description,
-            user_defined=species.smiles in user_smiles,
+            user_defined=canonical_smiles(species.smiles) in user_smiles,
         )
         for species, count in sorted(grouped.items(), key=lambda item: item[0].name)
         if count > 0
@@ -1958,6 +2004,8 @@ class EquationCheck:
     lhs_bonds: Counter[str]
     rhs_bonds: Counter[str]
     errors: tuple[str, ...]
+    #: Net formal charge, right minus left.
+    charge_delta: int = 0
 
     @property
     def ok(self) -> bool:
@@ -2148,7 +2196,17 @@ def check_equation(text: str) -> EquationCheck:
         bonds_left,
         bonds_right,
         (),
+        _side_net_charge(right) - _side_net_charge(left),
     )
+
+
+def _side_net_charge(side: Sequence[tuple[int, str]]) -> int:
+    total = 0
+    for count, smiles in side:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is not None:
+            total += count * sum(atom.GetFormalCharge() for atom in mol.GetAtoms())
+    return total
 
 
 def format_equation_sides(
@@ -2183,7 +2241,12 @@ def build_equation_check_text(check: EquationCheck) -> str:
         f"{format_equation_sides(check.left, check.right)}\n\n"
         f"Reaction type: {check.reaction_type}\n"
         f"{verdict('Atoms', check.atom_delta)}\n"
-        f"{verdict('Groups', check.group_delta)}\n"
+        + (
+            f"Charge: NOT conserved ({check.charge_delta:+})\n"
+            if check.charge_delta
+            else ""
+        )
+        + f"{verdict('Groups', check.group_delta)}\n"
         f"{verdict('Bond types', check.bond_delta)}\n\n"
         f"Left-side bond counts: {format_counter(check.lhs_bonds)}\n"
         f"Right-side bond counts: {format_counter(check.rhs_bonds)}\n\n"
@@ -2250,6 +2313,12 @@ def build_equation_check_html(check: EquationCheck) -> str:
         f'font-weight:bold;">{html.escape(check.reaction_type)}</span></p>'
         '<ul style="margin:4px 0 12px 16px; padding:0; list-style-type:disc;">'
         + row("Atoms", check.atom_delta)
+        + (
+            '<li><span style="color:#9aa0a6;">Charge</span>: <span style="color:#f28b82;'
+            f' font-weight:bold;">not conserved</span> ({check.charge_delta:+})</li>'
+            if check.charge_delta
+            else ""
+        )
         + row("Groups", check.group_delta)
         + row("Bond types", check.bond_delta)
         + "</ul>"
@@ -2327,6 +2396,7 @@ def export_equation_check(
             return
         writer.writerow(["Reaction type", check.reaction_type])
         writer.writerow(["Atoms conserved", not check.atom_delta])
+        writer.writerow(["Charge conserved", not check.charge_delta])
         writer.writerow(["Groups conserved", not check.group_delta])
         writer.writerow(["Bond types conserved", not check.bond_delta])
         writer.writerow([])

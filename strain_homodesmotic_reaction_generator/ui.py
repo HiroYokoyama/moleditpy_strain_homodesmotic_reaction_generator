@@ -54,6 +54,7 @@ from .core import (
     AnalysisResult,
     analyze_molecule,
     build_equation_check_html,
+    canonical_smiles,
     check_equation,
     export_analysis,
     export_equation_check,
@@ -785,11 +786,14 @@ if QDialog is not None:
                 self.reference_overrides[name] = smiles
             else:
                 species = entry[1]
-                self.excluded = [s for s in self.excluded if s != species.smiles]
+                key = canonical_smiles(species.smiles)
+                self.excluded = [
+                    s for s in self.excluded if canonical_smiles(s) != key
+                ]
                 self.user_species = [
                     existing
                     for existing in self.user_species
-                    if existing.smiles != species.smiles
+                    if canonical_smiles(existing.smiles) != key
                 ]
                 self.user_species.append(species)
             self._stage()
@@ -862,8 +866,16 @@ if QDialog is not None:
             return self._table_rows[row]
 
         def _species_for(self, smiles: str) -> Any:
+            # The solver reports a species under the library's spelling when
+            # the user's entry is the same molecule written differently.
+            key = canonical_smiles(smiles)
             return next(
-                (item for item in self.user_species if item.smiles == smiles), None
+                (
+                    item
+                    for item in self.user_species
+                    if canonical_smiles(item.smiles) == key
+                ),
+                None,
             )
 
         # -- analysis ----------------------------------------------------------
