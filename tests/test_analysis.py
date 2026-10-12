@@ -159,11 +159,12 @@ def test_analyze_methylamine_detects_primary_amine():
     assert "Primary-Primary-Amine" in names
 
 
-def test_analyze_unsolvable_molecule_triggers_elemental_balance():
+def test_analyze_unsolvable_molecule_remains_an_unresolved_draft():
     mol = Chem.MolFromSmiles("C1N2CN3CN1CN(C2)C3")  # Hexamethylenetetramine
     result = analyze_molecule(mol)
-    assert result.is_elemental_balance
-    assert "Calculated in elemental balance mode" in result.equation_html
+    assert result.solver_failed
+    assert not result.is_elemental_balance
+    assert "No exact MILP solution" in result.equation_html
 
 
 def test_analyze_trimethylamine_detects_tertiary_amine():
@@ -187,14 +188,13 @@ def test_plugin_metadata():
     assert "scipy" in PLUGIN_DEPENDENCIES
 
 
-def test_analyze_fallback_triggered_when_milp_is_missing(monkeypatch):
+def test_analyze_requires_scipy(monkeypatch):
     import strain_homodesmotic_reaction_generator.core as core
 
     monkeypatch.setattr(core, "milp", None)
     mol = Chem.MolFromSmiles("COC")
-    result = core.analyze_molecule(mol)
-    assert result.is_elemental_balance
-    assert "Calculated in elemental balance mode" in result.equation_html
+    with pytest.raises(RuntimeError, match="SciPy is required"):
+        core.analyze_molecule(mol)
 
 
 def test_analyze_benzene_aromatic():
@@ -353,9 +353,9 @@ def test_reaction_type_classification():
     )
     assert result_cpp.reaction_type == "Hyperhomodesmotic"
 
-    # Hexamethylenetetramine has environment matching constraints, falling back to Elemental Balance
+    # Hexamethylenetetramine has no exact solution in this reference library.
     result_hmta = analyze_molecule(Chem.MolFromSmiles("C1N2CN3CN1CN(C2)C3"))
-    assert result_hmta.reaction_type == "Elemental Balance"
+    assert result_hmta.reaction_type == "Unbalanced"
 
 
 def test_reaction_type_classification_levels():

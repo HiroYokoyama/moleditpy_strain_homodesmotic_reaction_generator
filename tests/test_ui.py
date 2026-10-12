@@ -170,7 +170,6 @@ def test_dialog_refresh_analysis_error_shows_message_box(monkeypatch):
 
 
 def test_on_analysis_success_elemental_balance_no_scipy(monkeypatch):
-    monkeypatch.setattr(ui, "milp", None)
     ctx = _FakeContext(molecule=None)
     dialog = ui.HomodesmoticAnalyzerDialog(ctx)
 
@@ -196,11 +195,10 @@ def test_on_analysis_success_elemental_balance_no_scipy(monkeypatch):
     dialog.on_analysis_success(result)
 
     assert dialog.warning_label.isVisible() is True
-    assert "SciPy not found" in dialog.warning_label.text()
+    assert "No exact MILP solution" in dialog.warning_label.text()
 
 
 def test_on_analysis_success_elemental_balance_with_scipy(monkeypatch):
-    monkeypatch.setattr(ui, "milp", lambda *a, **kw: None)
     ctx = _FakeContext(molecule=None)
     dialog = ui.HomodesmoticAnalyzerDialog(ctx)
 
@@ -208,7 +206,7 @@ def test_on_analysis_success_elemental_balance_with_scipy(monkeypatch):
     dialog.on_analysis_success(result)
 
     assert dialog.warning_label.isVisible() is True
-    assert "No exact MILP balance possible" in dialog.warning_label.text()
+    assert "No exact MILP solution" in dialog.warning_label.text()
 
 
 # ---------------------------------------------------------------------------

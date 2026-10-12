@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import html
+import logging
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -33,14 +34,14 @@ except ImportError:
 
 
 from .data import (
-    EnvironmentRule,
-    BalanceSpecies,
-    UserSpecies,
+    _BALANCE_CORE_MAP,
+    BALANCE_SPECIES,
+    ENVIRONMENTS,
     SIDE_LEFT,
     SIDE_RIGHT,
-    ENVIRONMENTS,
-    BALANCE_SPECIES,
-    _BALANCE_CORE_MAP,
+    BalanceSpecies,
+    EnvironmentRule,
+    UserSpecies,
 )
 
 
@@ -97,6 +98,7 @@ class AnalysisResult:
     excluded_species: tuple[str, ...] = ()
     ignored_exclusions: tuple[str, ...] = ()
     is_identity: bool = False
+    solver_failed: bool = False
 
 
 #: Shown wherever the tool states a verdict. It conserves what it counts, and
@@ -110,6 +112,13 @@ SELF_CHECK_NOTE = (
 def _require_rdkit() -> None:
     if Chem is None:
         raise RuntimeError("RDKit is not available.")
+
+
+def _require_scipy() -> None:
+    if milp is None or np is None:
+        raise RuntimeError(
+            "SciPy is required for reaction analysis. Install scipy before analyzing a molecule."
+        )
 
 
 def atom_counts(mol: Any) -> Counter[str]:
@@ -340,15 +349,20 @@ def classify_sides(
     def gather(side: Sequence[tuple[int, str]]) -> list[tuple[Any, int]]:
         mols = []
         for count, smiles in side:
-            if count <= 0 or not smiles:
+            if count == 0:
                 continue
+            if count < 0 or int(count) != count or not smiles:
+                raise ValueError("Reaction coefficients must be nonnegative integers and species must be readable.")
             mol = Chem.MolFromSmiles(smiles)
-            if mol is not None:
-                mols.append((Chem.AddHs(mol), count))
+            if mol is None or mol.GetNumAtoms() == 0:
+                raise ValueError("Cannot read reaction species as a molecule.")
+            mols.append((Chem.AddHs(mol), count))
         return mols
 
     lhs_mols = gather(left)
     rhs_mols = gather(right)
+    if not lhs_mols or not rhs_mols:
+        return "Unbalanced"
 
     # 1. Elemental Balance check
     lhs_atoms: Counter[str] = Counter()
@@ -405,9 +419,6 @@ def classify_sides(
         for group, grp_count in count_groups(Chem.RemoveHs(mol)).items():
             rhs_groups[group] += grp_count * count
 
-    if lhs_groups == rhs_groups:
-        return "Homodesmotic"
-
     # 4. Isodesmic check (LHS simple bonds == RHS simple bonds)
     lhs_simple_bonds: Counter[str] = Counter()
     for mol, count in lhs_mols:
@@ -420,6 +431,8 @@ def classify_sides(
             rhs_simple_bonds[btype] += b_count * count
 
     if lhs_simple_bonds == rhs_simple_bonds:
+        if lhs_groups == rhs_groups:
+            return "Homodesmotic"
         return "Isodesmic"
 
     return "Elemental Balance"
@@ -492,6 +505,7 @@ def analyze_molecule(
             Counter(),
         )
 
+    _require_scipy()
     overrides = {
         name: smiles.strip()
         for name, smiles in (reference_overrides or {}).items()
@@ -581,56 +595,47 @@ def analyze_molecule(
     unmet_required: tuple[str, ...] = ()
     ignored_exclusions: tuple[str, ...] = ()
 
-    if milp is not None and np is not None:
-        # Keeping a reference off the left stops the solver cancelling the
-        # equation down to something that no longer measures the target. It is
-        # pointless when the target IS one of its own references, though: that
-        # equation is an identity whatever the solver does, and insisting
-        # otherwise drags in unrelated species to avoid an honest answer.
-        reference_side = tuple(term.smiles for term in rhs_terms)
-        target_canonical = canonical_smiles(target_smiles)
-        if any(
-            canonical_smiles(smiles) == target_canonical for smiles in reference_side
-        ):
-            reference_side = ()
-        # An exclusion that leaves nothing balanceable is dropped rather than
-        # failing the run, the same way an impossible requirement is.
-        for banned in (excluded, ()) if excluded else ((),):
-            left_balance_terms, right_balance_terms, milp_success, unmet_required = (
-                build_hyperhomodesmotic_balance_terms(
-                    group_delta,
-                    atom_delta,
-                    extra_species,
-                    required_smiles,
-                    reference_side,
-                    banned,
-                    required_sides,
-                    target_smiles,
-                    tuple(target_atoms),
-                )
+    # Keeping a reference off the left stops the solver cancelling the
+    # equation down to something that no longer measures the target. It is
+    # pointless when the target IS one of its own references, though: that
+    # equation is an identity whatever the solver does, and insisting
+    # otherwise drags in unrelated species to avoid an honest answer.
+    reference_side = tuple(term.smiles for term in rhs_terms)
+    target_canonical = canonical_smiles(target_smiles)
+    if any(
+        canonical_smiles(smiles) == target_canonical for smiles in reference_side
+    ):
+        reference_side = ()
+    # An exclusion that leaves nothing balanceable is dropped rather than
+    # failing the run, the same way an impossible requirement is.
+    for banned in (excluded, ()) if excluded else ((),):
+        left_balance_terms, right_balance_terms, milp_success, unmet_required = (
+            build_hyperhomodesmotic_balance_terms(
+                group_delta,
+                atom_delta,
+                extra_species,
+                required_smiles,
+                reference_side,
+                banned,
+                required_sides,
+                target_smiles,
+                tuple(target_atoms),
+                sum(term.count * _side_net_charge([(1, term.smiles)]) for term in rhs_terms)
+                - sum(atom.GetFormalCharge() for atom in mol.GetAtoms()),
             )
-            if milp_success:
-                ignored_exclusions = () if banned else excluded
-                break
+        )
+        if milp_success:
+            ignored_exclusions = () if banned else excluded
+            break
 
     if not milp_success:
-        left_needed = Counter(
+        unresolved_left_atoms = Counter(
             {element: count for element, count in atom_delta.items() if count > 0}
         )
-        right_needed = Counter(
+        unresolved_right_atoms = Counter(
             {element: -count for element, count in atom_delta.items() if count < 0}
         )
-        left_balance_terms, unresolved_left_atoms, unmet_left = build_balance_terms(
-            left_needed, extra_species, required_smiles, excluded
-        )
-        right_balance_terms, unresolved_right_atoms, unmet_right = build_balance_terms(
-            right_needed, extra_species, required_smiles, excluded
-        )
-        # A required species only has to land on one side, so it counts as
-        # unmet only when neither side could take it.
-        unmet_required = tuple(
-            smiles for smiles in unmet_left if smiles in set(unmet_right)
-        )
+        left_balance_terms, right_balance_terms = (), ()
 
     # Algebraic cancellation of identical reference molecules on both sides
     # Keyed by molecule, not spelling: the library's CCOC and the reference
@@ -806,6 +811,28 @@ def analyze_molecule(
             identity_right[canonical_smiles(term.smiles)] += term.count
     is_identity = bool(identity_left) and identity_left == identity_right
 
+    # Requirements describe the final equation, after identical terms cancel.
+    left_present = {
+        canonical_smiles(t.smiles) for t in left_balance_terms if t.count > 0
+    }
+    right_present = {
+        canonical_smiles(t.smiles)
+        for t in (*rhs_terms, *right_balance_terms)
+        if t.count > 0
+    }
+    unmet = []
+    for smiles in required_smiles:
+        side = required_sides.get(smiles)
+        if side == SIDE_LEFT:
+            present = left_present
+        elif side == SIDE_RIGHT:
+            present = right_present
+        else:
+            present = left_present | right_present
+        if canonical_smiles(smiles) not in present:
+            unmet.append(smiles)
+    unmet_required = tuple(unmet)
+
     user_input_lines = describe_user_input(
         tuple(sorted(overrides.items())),
         kept_species,
@@ -814,6 +841,10 @@ def analyze_molecule(
         excluded,
         ignored_exclusions,
     )
+    if not milp_success:
+        user_input_lines += (
+            "No exact MILP solution was found; this is an unresolved draft.",
+        )
 
     equation_text = build_equation_text(
         target_smiles,
@@ -843,7 +874,7 @@ def analyze_molecule(
         right_balance_terms,
         unresolved_left_atoms,
         unresolved_right_atoms,
-        not milp_success,
+        False,
         target_bonds,
         reaction_bonds_delta,
         reaction_type,
@@ -864,7 +895,7 @@ def analyze_molecule(
         tuple(matches),
         equation_text,
         equation_html,
-        not milp_success,
+        False,
         target_bonds,
         reaction_bonds_delta,
         reaction_type,
@@ -877,6 +908,7 @@ def analyze_molecule(
         excluded,
         ignored_exclusions,
         is_identity,
+        not milp_success,
     )
 
 
@@ -1086,6 +1118,7 @@ def build_hyperhomodesmotic_balance_terms(
     required_sides: Mapping[str, str] | None = None,
     target_smiles: str = "",
     target_elements: Sequence[str] = (),
+    charge_delta: int = 0,
 ) -> tuple[tuple[BalanceTerm, ...], tuple[BalanceTerm, ...], bool, tuple[str, ...]]:
     """Solve for a perfectly balanced hyperhomodesmotic reaction using MILP.
 
@@ -1096,12 +1129,13 @@ def build_hyperhomodesmotic_balance_terms(
     without this the solver was free to balance cyclopropane by adding
     tetramethylsilane to one side.
     """
+    _require_scipy()
     pool, user_smiles = balance_pool(extra_species, excluded_smiles)
     # Keep the user's order: it decides which requirement yields to which when
     # they cannot all be met.
     required = tuple(dict.fromkeys(smiles for smiles in required_smiles if smiles))
 
-    if not group_delta and not required:
+    if not group_delta and not atom_delta and not charge_delta and not required:
         return (), (), True, ()
 
     species_list = []
@@ -1125,17 +1159,19 @@ def build_hyperhomodesmotic_balance_terms(
     n_groups = len(group_names)
     n_species = len(species_list)
 
-    A = np.zeros((n_groups + len(element_names), n_species))
+    A = np.zeros((n_groups + len(element_names) + 1, n_species))
     for j, (_, c, a) in enumerate(species_list):
         for i, name in enumerate(group_names):
             A[i, j] = c[name]
         for i, element in enumerate(element_names):
             A[n_groups + i, j] = a[element]
+        A[-1, j] = _side_net_charge([(1, species_list[j][0].smiles)])
 
     A_eq = np.hstack((A, -A))
     b_eq = np.array(
         [group_delta.get(name, 0) for name in group_names]
         + [atom_delta.get(element, 0) for element in element_names]
+        + [charge_delta]
     )
 
     # Anything outside the target's own elements is a foreign carrier: a valid
@@ -1376,10 +1412,26 @@ def _solve_with_required(
             constraints=all_constraints,
             integrality=np.ones(n_vars),
             bounds=bounds,
+            options={"time_limit": 10.0},
         )
-    except Exception:
+    except (ValueError, RuntimeError) as exc:
+        logging.warning("Homodesmotic solver failed: %s", exc, exc_info=True)
         return None
-    return res if res.success else None
+    if not res.success or res.x is None:
+        return None
+    values = np.asarray(res.x, dtype=float)
+    if values.shape != (n_vars,) or not np.isfinite(values).all():
+        return None
+    rounded = np.rint(values)
+    if not np.allclose(values, rounded, rtol=0, atol=1e-6):
+        return None
+    if np.any(rounded < lower) or np.any(rounded > upper):
+        return None
+    for constraint in all_constraints:
+        actual = constraint.A @ rounded
+        if np.any(actual < constraint.lb - 1e-7) or np.any(actual > constraint.ub + 1e-7):
+            return None
+    return res
 
 
 def build_balance_terms(
@@ -2124,9 +2176,12 @@ def parse_equation(
     Accepts a line copied straight out of the report, coefficients and all.
     """
     cleaned = (text or "").strip()
-    for arrow in _ARROWS:
-        cleaned = cleaned.replace(arrow, "\n->\n")
-    pieces = [piece.strip() for piece in cleaned.split("\n->\n")]
+    arrow_pattern = "|".join(re.escape(arrow) for arrow in _ARROWS)
+    # Delimited arrows distinguish the reaction from SMILES dative bonds.
+    delimiter = rf"(?<!\S)(?:{arrow_pattern})(?!\S)"
+    if not re.search(delimiter, cleaned):
+        delimiter = arrow_pattern
+    pieces = [piece.strip() for piece in re.split(delimiter, cleaned)]
     if len(pieces) == 1:
         return [], [], ["No arrow found. Write the reaction as 'A + B -> C'."]
     if len(pieces) > 2:

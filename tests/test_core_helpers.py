@@ -504,19 +504,13 @@ def test_build_hyperhomodesmotic_requires_scipy():
 # ---------------------------------------------------------------------------
 
 
-def test_ui_module_imports_milp_for_warning_distinction():
-    """ui.py must import milp so it can show the right warning when scipy IS installed
-    but MILP fails, vs. when scipy is missing entirely."""
-    import importlib
-    import types
-    import sys as _sys
+def test_missing_scipy_is_reported_by_the_worker(monkeypatch):
+    from strain_homodesmotic_reaction_generator import core, ui
 
-    # Stub out PyQt6 if not present so ui.py can be imported headlessly
-    for mod_name in ["PyQt6", "PyQt6.QtCore", "PyQt6.QtWidgets", "PyQt6.QtGui"]:
-        _sys.modules.setdefault(mod_name, types.ModuleType(mod_name))
-
-    ui = importlib.import_module("strain_homodesmotic_reaction_generator.ui")
-    assert hasattr(ui, "milp"), (
-        "ui.py must import 'milp' from core to display context-aware warning "
-        "when scipy is installed but MILP balance fails"
-    )
+    monkeypatch.setattr(core, "milp", None)
+    worker = ui.AnalysisWorker(Chem.MolFromSmiles("CC"))
+    errors = []
+    worker.error.connect(errors.append)
+    worker.run()
+    assert len(errors) == 1
+    assert "SciPy is required" in errors[0]

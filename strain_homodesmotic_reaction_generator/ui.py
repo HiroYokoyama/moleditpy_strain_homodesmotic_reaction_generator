@@ -7,18 +7,20 @@ PyQt6 user interface for Strain Homodesmotic Reaction Generator.
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from typing import Any
 
 try:
-    from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
+    from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
+    from PyQt6.QtGui import QBrush, QColor
     from PyQt6.QtWidgets import (
         QAbstractItemView,
         QComboBox,
         QDialog,
         QFileDialog,
-        QHeaderView,
         QHBoxLayout,
+        QHeaderView,
         QLabel,
         QLineEdit,
         QMessageBox,
@@ -28,7 +30,6 @@ try:
         QTextEdit,
         QVBoxLayout,
     )
-    from PyQt6.QtGui import QColor, QBrush
 except ImportError:  # pragma: no cover
     Qt = None  # type: ignore[assignment]
     QThread = None  # type: ignore[assignment]
@@ -50,8 +51,8 @@ except ImportError:  # pragma: no cover
     QVBoxLayout = None  # type: ignore[assignment]
 
 from .core import (
-    Chem,
     AnalysisResult,
+    Chem,
     analyze_molecule,
     build_equation_check_html,
     canonical_smiles,
@@ -60,7 +61,6 @@ from .core import (
     export_equation_check,
     format_equation_sides,
     is_valid_smiles,
-    milp,
 )
 from .data import ENVIRONMENTS, SIDE_ANY, SIDE_LEFT, SIDE_RIGHT, UserSpecies
 
@@ -295,7 +295,7 @@ if QDialog is not None:
             excluded: tuple[str, ...] = (),
         ) -> None:
             super().__init__()
-            self.mol = mol
+            self.mol = Chem.Mol(mol) if mol is not None else None
             self.reference_overrides = dict(reference_overrides or {})
             self.user_species = tuple(user_species)
             self.excluded = tuple(excluded)
@@ -309,7 +309,8 @@ if QDialog is not None:
                     self.excluded,
                 )
                 self.finished.emit(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - report worker failures to the GUI
+                logging.exception("Homodesmotic analysis failed")
                 self.error.emit(str(e))
 
     class LoadingDialog(QDialog):
@@ -964,17 +965,8 @@ if QDialog is not None:
                     + ", ".join(result.unmet_required)
                     + "; it was left out."
                 )
-            if result.is_elemental_balance:
-                if milp is None:
-                    messages.append(
-                        "SciPy not found - install scipy for exact MILP balance; "
-                        "operating in elemental balance mode."
-                    )
-                else:
-                    messages.append(
-                        "No exact MILP balance possible for this molecule; "
-                        "operating in elemental balance mode."
-                    )
+            if result.solver_failed or result.is_elemental_balance:
+                messages.append("No exact MILP solution was found; this is an unresolved draft.")
             self.warning_label.setText("\n".join(f"⚠️ {m}" for m in messages))
             self.warning_label.setVisible(bool(messages))
 

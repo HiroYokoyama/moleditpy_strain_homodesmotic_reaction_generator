@@ -220,9 +220,8 @@ class TestNoPhantomElements(unittest.TestCase):
         left, right, ok, unmet = core.build_hyperhomodesmotic_balance_terms(
             Counter(), Counter({"Si": 1})
         )
-        # Empty group delta short-circuits to the trivial solution.
         self.assertEqual((left, right), ((), ()))
-        self.assertTrue(ok)
+        self.assertFalse(ok)
 
 
 @unittest.skipUnless(HAS_RDKIT, "rdkit not installed")
