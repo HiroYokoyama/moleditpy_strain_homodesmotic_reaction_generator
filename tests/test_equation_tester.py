@@ -395,7 +395,7 @@ def test_the_tester_offers_an_export_button():
 
 def test_the_tester_can_export_before_anything_was_checked(tmp_path):
     """Opening the tester with no draft leaves last_check unset otherwise."""
-    import PyQt6.QtWidgets as qtw
+    import PySide6.QtWidgets as qtw
 
     tester = ui.TestEquationDialog(None, "")
     target = tmp_path / "check.txt"
@@ -408,7 +408,7 @@ def test_the_tester_can_export_before_anything_was_checked(tmp_path):
 
 
 def test_cancelling_the_export_writes_nothing(tmp_path):
-    import PyQt6.QtWidgets as qtw
+    import PySide6.QtWidgets as qtw
 
     tester = ui.TestEquationDialog(None, REPORT_LINE)
     qtw.QFileDialog._next_return = ("", "")

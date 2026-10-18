@@ -718,7 +718,7 @@ def test_environment_names_fall_back_to_every_rule_with_no_molecule():
 
 def test_no_cell_is_editable():
     """The table reports the draft; changes go through Add and Edit."""
-    import PyQt6.QtCore as qtc
+    import PySide6.QtCore as qtc
 
     dialog = _dialog()
     dialog.apply_new_entry(("balance", UserSpecies("CCCCCCC", "heptane")))

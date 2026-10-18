@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-PyQt6 user interface for Strain Homodesmotic Reaction Generator.
+PySide6 user interface for Strain Homodesmotic Reaction Generator.
 """
 
 from __future__ import annotations
@@ -12,9 +12,9 @@ from collections import Counter
 from typing import Any
 
 try:
-    from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
-    from PyQt6.QtGui import QBrush, QColor
-    from PyQt6.QtWidgets import (
+    from PySide6.QtCore import QObject, Qt, QThread, Signal
+    from PySide6.QtGui import QBrush, QColor
+    from PySide6.QtWidgets import (
         QAbstractItemView,
         QComboBox,
         QDialog,
@@ -33,7 +33,7 @@ try:
 except ImportError:  # pragma: no cover
     Qt = None  # type: ignore[assignment]
     QThread = None  # type: ignore[assignment]
-    pyqtSignal = None  # type: ignore[assignment]
+    Signal = None  # type: ignore[assignment]
     QObject = None  # type: ignore[assignment]
     QAbstractItemView = None  # type: ignore[assignment]
     QComboBox = None  # type: ignore[assignment]
@@ -284,8 +284,8 @@ if QDialog is not None:
     class AnalysisWorker(QObject):
         """Worker to run molecule analysis in a background thread."""
 
-        finished = pyqtSignal(object)
-        error = pyqtSignal(str)
+        finished = Signal(object)
+        error = Signal(str)
 
         def __init__(
             self,
@@ -1377,7 +1377,7 @@ if QDialog is not None:
 
 def open_analyzer_dialog(context: Any) -> None:
     if QDialog is None:
-        _status(context, "PyQt6 is not available.", 5000)
+        _status(context, "PySide6 is not available.", 5000)
         return
     if Chem is None:
         _status(context, "RDKit is not available.", 5000)
