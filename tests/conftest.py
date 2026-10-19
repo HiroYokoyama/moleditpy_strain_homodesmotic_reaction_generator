@@ -1,16 +1,16 @@
 """
-Shared headless PyQt6 stubs for the Strain Homodesmotic Reaction Generator
+Shared headless PySide6 stubs for the Strain Homodesmotic Reaction Generator
 test suite.
 
 Installed at collection time (before any test module imports
 ``strain_homodesmotic_reaction_generator.ui``) so that ``ui.py``'s
 ``QDialog is not None`` branch executes and its dialog/worker classes are
 actually defined -- letting ``tests/test_ui.py`` instantiate and drive them
-directly without a real Qt runtime (CI does not install PyQt6 at all).
+directly without a real Qt runtime (CI does not install PySide6 at all).
 
 Uses real-ish stand-in classes (not bare ``MagicMock``) for anything that
 ``ui.py`` subclasses or wires signals/slots through, so ``connect``/``emit``
-behave like the real PyQt6 signal-slot mechanism synchronously.
+behave like the real PySide6 signal-slot mechanism synchronously.
 """
 
 import inspect
@@ -20,8 +20,8 @@ from unittest.mock import MagicMock
 
 
 def _install_qt_stubs():
-    if "PyQt6" in sys.modules and getattr(
-        sys.modules["PyQt6"], "_shrg_rich_stub", False
+    if "PySide6" in sys.modules and getattr(
+        sys.modules["PySide6"], "_shrg_rich_stub", False
     ):
         return
 
@@ -62,7 +62,7 @@ def _install_qt_stubs():
                     n_params = len(args)
                 slot(*args[:n_params])
 
-    class pyqtSignal:  # noqa: N801 - mimic PyQt6's lowercase factory name
+    class Signal:  # noqa: N801 - mimic PySide6's lowercase factory name
         def __init__(self, *args, **kwargs):
             self._name = None
 
@@ -100,8 +100,8 @@ def _install_qt_stubs():
         pass
 
     class _QThread(_QBase):
-        started = pyqtSignal()
-        finished = pyqtSignal()
+        started = Signal()
+        finished = Signal()
 
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
@@ -608,13 +608,13 @@ def _install_qt_stubs():
         def addStretch(self, *args, **kwargs):
             pass
 
-    qt_core = types.ModuleType("PyQt6.QtCore")
+    qt_core = types.ModuleType("PySide6.QtCore")
     qt_core.Qt = _Qt
     qt_core.QThread = _QThread
-    qt_core.pyqtSignal = pyqtSignal
+    qt_core.Signal = Signal
     qt_core.QObject = _QObject
 
-    qt_widgets = types.ModuleType("PyQt6.QtWidgets")
+    qt_widgets = types.ModuleType("PySide6.QtWidgets")
     qt_widgets.QAbstractItemView = _QAbstractItemView
     qt_widgets.QCheckBox = _QCheckBox
     qt_widgets.QComboBox = _QComboBox
@@ -632,21 +632,21 @@ def _install_qt_stubs():
     qt_widgets.QTextEdit = _QTextEdit
     qt_widgets.QVBoxLayout = _QLayout
 
-    qt_gui = types.ModuleType("PyQt6.QtGui")
+    qt_gui = types.ModuleType("PySide6.QtGui")
     qt_gui.QColor = _QColor
     qt_gui.QBrush = _QBrush
 
-    pyqt6 = types.ModuleType("PyQt6")
-    pyqt6.QtCore = qt_core
-    pyqt6.QtWidgets = qt_widgets
-    pyqt6.QtGui = qt_gui
-    pyqt6._shrg_rich_stub = True
+    pyside6 = types.ModuleType("PySide6")
+    pyside6.QtCore = qt_core
+    pyside6.QtWidgets = qt_widgets
+    pyside6.QtGui = qt_gui
+    pyside6._shrg_rich_stub = True
 
     for name, mod in [
-        ("PyQt6", pyqt6),
-        ("PyQt6.QtCore", qt_core),
-        ("PyQt6.QtWidgets", qt_widgets),
-        ("PyQt6.QtGui", qt_gui),
+        ("PySide6", pyside6),
+        ("PySide6.QtCore", qt_core),
+        ("PySide6.QtWidgets", qt_widgets),
+        ("PySide6.QtGui", qt_gui),
     ]:
         sys.modules[name] = mod
 

@@ -1,7 +1,7 @@
 """
-Headless tests for ui.py (PyQt6 dialog / worker / menu wiring).
+Headless tests for ui.py (PySide6 dialog / worker / menu wiring).
 
-tests/conftest.py installs rich PyQt6 stubs before this module is imported,
+tests/conftest.py installs rich PySide6 stubs before this module is imported,
 so ``ui.QDialog is not None`` and the real dialog/worker classes defined in
 ``ui.py`` are exercised directly (no real Qt runtime, no GUI).
 """
@@ -156,7 +156,7 @@ def test_dialog_refresh_analysis_error_shows_message_box(monkeypatch):
     monkeypatch.setattr(ui, "analyze_molecule", _boom)
     ctx = _FakeContext(molecule=Chem.MolFromSmiles("CC"))
 
-    import PyQt6.QtWidgets as qtw
+    import PySide6.QtWidgets as qtw
 
     qtw.QMessageBox.critical_calls.clear()
     dialog = ui.HomodesmoticAnalyzerDialog(ctx)
@@ -295,7 +295,7 @@ def test_load_reference_uses_host_importer_when_available():
 
 
 def test_load_reference_shows_information_box_when_unsupported():
-    import PyQt6.QtWidgets as qtw
+    import PySide6.QtWidgets as qtw
 
     qtw.QMessageBox.information_calls.clear()
     ctx = _FakeContext(molecule=None)
@@ -315,7 +315,7 @@ def test_load_reference_shows_information_box_when_unsupported():
 
 
 def test_export_analysis_returns_early_when_no_path_chosen():
-    import PyQt6.QtWidgets as qtw
+    import PySide6.QtWidgets as qtw
 
     qtw.QFileDialog._next_return = ("", "")
     ctx = _FakeContext(molecule=None)
@@ -328,7 +328,7 @@ def test_export_analysis_returns_early_when_no_path_chosen():
 
 
 def test_export_analysis_success_writes_file(tmp_path):
-    import PyQt6.QtWidgets as qtw
+    import PySide6.QtWidgets as qtw
 
     out_file = tmp_path / "draft.html"
     qtw.QFileDialog._next_return = (str(out_file), "HTML Files (*.html)")
@@ -344,7 +344,7 @@ def test_export_analysis_success_writes_file(tmp_path):
 
 
 def test_export_analysis_failure_shows_message_box(tmp_path, monkeypatch):
-    import PyQt6.QtWidgets as qtw
+    import PySide6.QtWidgets as qtw
 
     out_file = tmp_path / "draft.html"
     qtw.QFileDialog._next_return = (str(out_file), "HTML Files (*.html)")
@@ -364,7 +364,7 @@ def test_export_analysis_failure_shows_message_box(tmp_path, monkeypatch):
 
 
 def test_export_analysis_uses_current_file_path_from_main_window(tmp_path):
-    import PyQt6.QtWidgets as qtw
+    import PySide6.QtWidgets as qtw
 
     out_file = tmp_path / "draft.html"
     qtw.QFileDialog._next_return = (str(out_file), "HTML Files (*.html)")
@@ -393,13 +393,13 @@ def test_export_analysis_uses_current_file_path_from_main_window(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_open_analyzer_dialog_reports_missing_pyqt6(monkeypatch):
+def test_open_analyzer_dialog_reports_missing_pyside6(monkeypatch):
     monkeypatch.setattr(ui, "QDialog", None)
     ctx = _FakeContext()
 
     ui.open_analyzer_dialog(ctx)
 
-    assert ("PyQt6 is not available.", 5000) in ctx.status_messages
+    assert ("PySide6 is not available.", 5000) in ctx.status_messages
 
 
 def test_open_analyzer_dialog_reports_missing_rdkit(monkeypatch):

@@ -14,14 +14,14 @@ from .ui import (
 )
 
 PLUGIN_NAME = "Strain Homodesmotic Reaction Generator"
-PLUGIN_VERSION = "0.11.0"
+PLUGIN_VERSION = "0.12.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 PLUGIN_DEPENDENCIES = ("numpy", "scipy")
 PLUGIN_DESCRIPTION = (
     "Detect strain-molecule bonding environments and build a draft homodesmotic "
     "reaction balance."
 )
-PLUGIN_SUPPORTED_MOLEDITPY_VERSION = ">=3.0.0, <5.0.0"
+PLUGIN_SUPPORTED_MOLEDITPY_VERSION = ">=5.0.0, <6.0.0"
 
 
 def initialize(context: Any) -> None:

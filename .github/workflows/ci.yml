@@ -1,6 +1,13 @@
 name: CI
 
 on:
+  workflow_dispatch:
+    inputs:
+      moleditpy_ref:
+        description: 'MoleditPy branch, tag, or full commit SHA (blank uses repository default)'
+        required: false
+        type: string
+        default: ''
   push:
     branches: [ main ]
   pull_request:
@@ -8,6 +15,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  MOLEDITPY_REF: ${{ inputs.moleditpy_ref || vars.MOLEDITPY_REF || 'migrate/pyside6-without-openbabel' }}
 
 jobs:
   test:
@@ -28,7 +38,13 @@ jobs:
         pip install rdkit numpy scipy pytest
 
     - name: Clone main app (real-context integration tests)
-      run: git clone --depth 1 https://github.com/HiroYokoyama/python_molecular_editor.git ../python_molecular_editor || true
+      shell: bash
+      run: |
+        git init "../python_molecular_editor"
+        git -C "../python_molecular_editor" remote add origin https://github.com/HiroYokoyama/python_molecular_editor.git
+        git -C "../python_molecular_editor" fetch --depth 1 origin "$MOLEDITPY_REF"
+        git -C "../python_molecular_editor" checkout --detach FETCH_HEAD
+        git -C "../python_molecular_editor" log -1 --format="%H %s"
 
     - name: Run tests
       env:
